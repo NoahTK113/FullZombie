@@ -1,0 +1,165 @@
+ZOMBIE GAME RULES
+=================
+
+Version:     001
+Date:        2026-09-24
+Supersedes:  none
+Status:      draft. Nothing below is approved until it appears in a released version.
+
+This file is authoritative and immutable. It is never edited in place. To change
+any statement, a complete new version is written, checked for internal
+consistency as a whole, approved line by line, and released as the next numbered
+file. The newest file in this folder is the current truth.
+
+Categories are for reading only. A statement applies everywhere regardless of
+the category it is filed under.
+
+Abbreviations: KC = kill currency. RM = raw materials.
+
+Changelog
+---------
+001  Initial version.
+
+
+GENERAL
+=======
+
+- Exploration requires capacity.
+
+- Capacity requires exploration.
+
+- Combat requires capacity.
+
+- Capacity requires combat.
+
+- The player starts with some capacity for combat and for exploration.
+
+- Most players finish.
+
+- No sub-part crafting: every item is usable or placeable.
+
+
+COMBAT
+======
+
+- Difficulty is fixed to the round, not to time or location.
+
+- Difficulty comes from horde size and speed, not from time to kill.
+
+- Zombie health is low relative to the player's weapons. No bullet sponges.
+
+- Combat is active, not passive: no hiding behind walls.
+
+- No automated combat.
+
+
+ROUND PROGRESSION AND ANCHOR
+============================
+
+- One Anchor zombie exists per round, tied to the round number.
+
+- Killing the Anchor starts the next round.
+
+- The Anchor and all zombies always move toward the player.
+
+- Rounds can overlap if the Anchor is killed before its horde is completely
+  destroyed.
+
+- The Anchor or zombies can be enclosed.
+
+- An enclosed Anchor or zombie breaks only what lies between it and the player.
+
+- The Anchor and all zombies always break all barriers in their path to the
+  player, whether or not the player is present.
+
+
+WORLD AND EXPLORATION
+=====================
+
+- Open world.
+
+- Atmosphere.
+
+- No hard-gated locations.
+
+- Location access is gated by navigation difficulty and hazards.
+
+- Self-sufficient institutional campus.
+
+- The campus has all necessary infrastructure: living, farming, recreation,
+  infirmary, power, food, maintenance.
+
+- Large central quarantined building or facility.
+
+- The endgame is at the center of the facility.
+
+- Progression is inward: the facility is layered like an onion.
+
+- Three to four distinct layers of location progression, with a distinct
+  atmosphere in each.
+
+
+ECONOMY
+=======
+
+- There are two main currency types: kill currency (KC) and raw materials (RM).
+
+- Kill currency is earned only by damaging or killing zombies.
+
+- Kill currency is a quantity tied to the living character, not an inventory
+  item.
+
+- Raw materials are found in the world and picked up.
+
+- Raw materials are carried or stored.
+
+- Carried raw materials and items are lost upon death.
+
+
+MACHINES
+========
+
+- All usable items come from machines.
+
+- A machine prints copies of its own type only.
+
+- Items and machine copies cost KC and RM.
+
+- Copies of machines are carried and placed, and can be lost.
+
+- Using machines costs kill currency and raw materials.
+
+- All items and raw materials are stored in the same inventory or storage, in
+  the same slots.
+
+- Machines are the primary findables.
+
+- Each machine type exists as one or more immovable originals somewhere in the
+  world.
+
+- Machines are self-replicating, at a cost of KC and RM.
+
+- Original machines cannot be lost. Copies made from originals can be carried
+  and placed.
+
+- Placed machines can be picked up again and moved.
+
+
+DEATH
+=====
+
+- Death resets the round to the starting round and difficulty, not the world.
+
+- The character and their abilities are lost on death.
+
+- The base, machines, stored RM and items persist through death.
+
+- Lost means gone forever: nothing is recoverable from the place of death.
+
+- Kill currency is lost on death.
+
+
+OPEN QUESTIONS (not rules)
+==========================
+
+(none yet)
