@@ -1,0 +1,224 @@
+ZOMBIE GAME RULES
+=================
+
+Version:     002
+Date:        2026-09-30
+Supersedes:  001
+Status:      draft. Nothing below is approved until it appears in a released version.
+
+This file is authoritative and immutable. It is never edited in place. To change
+any statement, a complete new version is written, checked for internal
+consistency as a whole, approved line by line, and released as the next numbered
+file. The newest file in this folder is the current truth.
+
+Categories are for reading only. A statement applies everywhere regardless of
+the category it is filed under.
+
+Abbreviations: KC = kill currency. RM = raw materials.
+
+Changelog
+---------
+001  Initial version.
+002  Added staged rules: upkeep, health regeneration, zombie health scaling,
+     structure damage, progression tiers, tier one machines, base weapons.
+
+
+GENERAL
+=======
+
+- Exploration requires capacity.
+
+- Capacity requires exploration.
+
+- Combat requires capacity.
+
+- Capacity requires combat.
+
+- The player starts with some capacity for combat and for exploration.
+
+- Most players finish.
+
+- No sub-part crafting: every item is usable or placeable.
+
+- No upkeep on food, water, etc.
+
+- No passive upkeep on machines or buildings.
+
+- No passive upkeep on anything that is not a direct consequence of player
+  action.
+
+- Examples of non-passive upkeep are restocking ammunition and rebuilding
+  structures that zombies damage during combat.
+
+- No degradation of weapons or other useful items.
+
+- Quickly regenerating health; no health packs or similar.
+
+
+COMBAT
+======
+
+- Difficulty is fixed to the round, not to time or location.
+
+- Difficulty comes from horde size and speed, not from time to kill.
+
+- Zombie health is low relative to the player's weapons. No bullet sponges.
+
+- Combat is active, not passive: no hiding behind walls.
+
+- No automated combat.
+
+- Zombie health scales with round, tuned to estimated player weapon strength.
+
+
+ROUND PROGRESSION AND ANCHOR
+============================
+
+- One Anchor zombie exists per round, tied to the round number.
+
+- Killing the Anchor starts the next round.
+
+- The Anchor and all zombies always move toward the player.
+
+- Rounds can overlap if the Anchor is killed before its horde is completely
+  destroyed.
+
+- The Anchor or zombies can be enclosed.
+
+- An enclosed Anchor or zombie breaks only what lies between it and the player.
+
+- The Anchor and all zombies always break all barriers in their path to the
+  player, whether or not the player is present.
+
+- Zombies only damage structures that completely prevent access to the player.
+
+
+WORLD AND EXPLORATION
+=====================
+
+- Open world.
+
+- Atmosphere.
+
+- No hard-gated locations.
+
+- Location access is gated by navigation difficulty and hazards.
+
+- Self-sufficient institutional campus.
+
+- The campus has all necessary infrastructure: living, farming, recreation,
+  infirmary, power, food, maintenance.
+
+- Large central quarantined building or facility.
+
+- The endgame is at the center of the facility.
+
+- Progression is inward: the facility is layered like an onion.
+
+- Three to four distinct layers of location progression, with a distinct
+  atmosphere in each.
+
+- Each exploration layer contains new and more powerful machines.
+
+
+PROGRESSION TIERS
+=================
+
+- Progression tiers are defined by location.
+
+- Each progression tier is characterized by the machines and raw materials
+  available in its locations.
+
+- Tier one has a weapons machine.
+
+- Tier one has a building machine.
+
+
+ECONOMY
+=======
+
+- There are two main currency types: kill currency (KC) and raw materials (RM).
+
+- Kill currency is earned only by damaging or killing zombies.
+
+- Kill currency is a quantity tied to the living character, not an inventory
+  item.
+
+- Raw materials are found in the world and picked up.
+
+- Raw materials are carried or stored.
+
+- Carried raw materials and items are lost upon death.
+
+
+MACHINES
+========
+
+- All usable items come from machines.
+
+- A machine prints copies of its own type only.
+
+- Items and machine copies cost KC and RM.
+
+- Copies of machines are carried and placed, and can be lost.
+
+- Using machines costs kill currency and raw materials.
+
+- All items and raw materials are stored in the same inventory or storage, in
+  the same slots.
+
+- Machines are the primary findables.
+
+- Each machine type exists as one or more immovable originals somewhere in the
+  world.
+
+- Machines are self-replicating, at a cost of KC and RM.
+
+- Original machines cannot be lost. Copies made from originals can be carried
+  and placed.
+
+- Placed machines can be picked up again and moved.
+
+- The weapons machine allows players to create weapons from raw materials and
+  kill currency.
+
+
+WEAPONS
+=======
+
+- The tier one weapons machine contains all base weapons.
+
+- Base weapons contain 10 to 20 firearms.
+
+- Base weapons contain 1 to 2 melee weapons.
+
+- Base weapon firearms span all basic firearm types.
+
+- Basic firearm types are: semi-automatic handgun, semi-automatic rifle,
+  automatic submachine gun, automatic assault rifle, automatic large machine
+  gun, pump shotgun, break action shotgun, sniper rifle, bolt action rifle.
+
+- Base weapons also include 1 to 2 types of explosives, including hand grenades
+  and maybe one other.
+
+- Base weapons also include 1 to 2 types of special weapons, to be determined.
+
+
+DEATH
+=====
+
+- Death resets the round to the starting round and difficulty, not the world.
+
+- The character and their abilities are lost on death.
+
+- The base, machines, stored RM and items persist through death.
+
+- Lost means gone forever: nothing is recoverable from the place of death.
+
+- Kill currency is lost on death.
+
+
+OPEN QUESTIONS (not rules)
+==========================
+
+(none yet)
