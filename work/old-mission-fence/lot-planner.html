@@ -131,8 +131,15 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; }
 #plan-json { width: 100%; font: 12px/1.4 var(--font-data); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
 
+.bgpanel { left: 16px; right: auto; width: 270px; }
+.bgpanel .field { grid-template-columns: 58px minmax(0, 1fr) 38px; }
+.bgpanel .row { align-items: center; }
+.field input[type="range"] { padding: 0; border: 0; background: none; accent-color: var(--accent); }
+.bg-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+
 @media (max-width: 700px) {
   kbd, .brand { display: none; }
+  .bgpanel { left: 16px; right: 16px; width: auto; }
   .bar { gap: 6px 10px; }
   .props { left: 16px; right: 16px; width: auto; top: 8px; }
 }
@@ -175,6 +182,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       <button class="btn" id="undo" title="Undo (Ctrl+Z)">Undo</button>
       <button class="btn" id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
       <button class="btn" id="fit" title="Fit the sheet in view (0)">Fit <kbd>0</kbd></button>
+      <button class="btn" id="bg-btn" title="Put a picture behind the plan and set how faint it is">Background</button>
       <button class="btn" id="file" title="Save a picture or move the plan">Save / Open</button>
       <button class="btn" id="clear" title="Delete everything on the sheet">Clear</button>
     </div>
@@ -183,6 +191,44 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   <main class="stage" id="stage">
     <canvas id="plan" aria-label="Lot plan drawing sheet, 656 by 492 feet"></canvas>
     <input id="text-input" class="text-input" type="text" hidden autocomplete="off" spellcheck="false" aria-label="Label text">
+    <aside class="props bgpanel" id="bg-panel" hidden aria-label="Background picture">
+      <div class="props-head">
+        <span class="props-kind">Background picture</span>
+        <button class="btn small" id="bg-close">Close</button>
+      </div>
+      <div class="row">
+        <label class="btn small" for="bg-file">Choose image</label>
+        <input type="file" id="bg-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+        <span class="bg-name" id="bg-name">No picture yet</span>
+      </div>
+      <div id="bg-controls" hidden>
+        <div class="field">
+          <label for="bg-opacity">Opacity</label>
+          <input type="range" id="bg-opacity" min="0" max="100" step="1" value="50">
+          <span class="unit" id="bg-opacity-val">50%</span>
+        </div>
+        <div class="field">
+          <label for="bg-w">Width</label>
+          <input id="bg-w" type="text" inputmode="decimal" autocomplete="off">
+          <span class="unit">ft</span>
+        </div>
+        <div class="field">
+          <label for="bg-x">X</label>
+          <input id="bg-x" type="text" inputmode="decimal" autocomplete="off">
+          <span class="unit">ft</span>
+        </div>
+        <div class="field">
+          <label for="bg-y">Y</label>
+          <input id="bg-y" type="text" inputmode="decimal" autocomplete="off">
+          <span class="unit">ft</span>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn small" id="bg-fit">Fit to sheet</button>
+          <button class="btn small" id="bg-remove">Remove</button>
+        </div>
+      </div>
+      <p class="note" id="bg-msg" role="status" style="font-size:12.5px"></p>
+    </aside>
     <aside class="props" id="props" hidden aria-label="Selected item">
       <div class="props-head">
         <span class="props-kind" id="props-kind">Line</span>
@@ -212,7 +258,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     </section>
     <section>
       <h3>Plan data</h3>
-      <p class="note">The plan saves automatically in this browser. To keep a backup or move it to another device, copy this text, then paste it back here and press Load.</p>
+      <p class="note">The plan saves automatically in this browser. To keep a backup or move it to another device, copy this text, then paste it back here and press Load. The background picture is not part of this text; add it again with Background.</p>
       <textarea id="plan-json" rows="6" spellcheck="false" aria-label="Plan data"></textarea>
       <div class="row">
         <button class="btn" id="copy-json">Copy</button>
@@ -512,6 +558,13 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     if (live) { c.shadowColor = 'rgba(10,20,28,0.25)'; c.shadowBlur = 18; c.shadowOffsetY = 4; }
     c.fillStyle = SHEET; c.fillRect(v.ox, v.oy, SHEET_W * v.s, SHEET_H * v.s);
     c.restore();
+    if (bg && bgImg) {
+      c.save();
+      c.beginPath(); c.rect(v.ox, v.oy, SHEET_W * v.s, SHEET_H * v.s); c.clip();
+      c.globalAlpha = bg.opacity;
+      c.drawImage(bgImg, v.ox + bg.x * v.s, v.oy + bg.y * v.s, bg.w * v.s, bgHeight() * v.s);
+      c.restore();
+    }
     if (showGrid) drawGrid(c, v, W, H);
     c.strokeStyle = 'rgba(29,42,51,0.75)'; c.lineWidth = 1.5;
     c.strokeRect(v.ox, v.oy, SHEET_W * v.s, SHEET_H * v.s);
@@ -1571,6 +1624,114 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       if (Date.now() - clearArmed >= 2900) { b.textContent = 'Clear'; b.classList.remove('danger'); }
     }, 3000);
   }
+
+  // ---- Background picture (kept in this browser, separate from the plan and its undo history) ----
+  const BG_KEY = 'lot-planner.bg';
+  let bg = null;      // { src, name, x, y, w, opacity }
+  let bgImg = null;
+  const bgPanel = $('#bg-panel');
+
+  function bgHeight() { return bgImg ? bg.w * bgImg.naturalHeight / bgImg.naturalWidth : 0; }
+
+  function saveBg() {
+    try {
+      if (bg) localStorage.setItem(BG_KEY, JSON.stringify(bg)); else localStorage.removeItem(BG_KEY);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function fitBg() {
+    const a = bgImg.naturalHeight / bgImg.naturalWidth;
+    let w = SHEET_W;
+    if (w * a > SHEET_H) w = SHEET_H / a;
+    bg.w = r2(w); bg.x = r2((SHEET_W - w) / 2); bg.y = r2((SHEET_H - w * a) / 2);
+  }
+
+  function refreshBgPanel() {
+    $('#bg-controls').hidden = !(bg && bgImg);
+    $('#bg-name').textContent = bg ? bg.name : 'No picture yet';
+    $('#bg-btn').setAttribute('aria-pressed', String(!bgPanel.hidden));
+    if (!bg) return;
+    const pct = Math.round(bg.opacity * 100);
+    $('#bg-opacity').value = pct;
+    $('#bg-opacity-val').textContent = pct + '%';
+    for (const k of ['w', 'x', 'y']) {
+      const el = $('#bg-' + k);
+      if (document.activeElement !== el) el.value = num2(bg[k]);
+    }
+  }
+
+  function showBgImage(src, onReady) {
+    const im = new Image();
+    im.onload = () => { bgImg = im; if (onReady) onReady(); refreshBgPanel(); requestRender(); };
+    im.onerror = () => { $('#bg-msg').textContent = 'That file could not be opened as a picture. Try a PNG or JPG.'; };
+    im.src = src;
+  }
+
+  // Very large pictures are scaled down so the browser can remember them
+  function shrinkIfHuge(src, done) {
+    if (src.length < 4e6) { done(src); return; }
+    const im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 3000 / Math.max(im.naturalWidth, im.naturalHeight));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(im.naturalWidth * k); cv.height = Math.round(im.naturalHeight * k);
+      const c = cv.getContext('2d');
+      c.fillStyle = '#ffffff'; c.fillRect(0, 0, cv.width, cv.height);
+      c.drawImage(im, 0, 0, cv.width, cv.height);
+      done(cv.toDataURL('image/jpeg', 0.85));
+    };
+    im.onerror = () => done(src);
+    im.src = src;
+  }
+
+  $('#bg-btn').addEventListener('click', () => { bgPanel.hidden = !bgPanel.hidden; refreshBgPanel(); });
+  $('#bg-close').addEventListener('click', () => { bgPanel.hidden = true; refreshBgPanel(); });
+  $('#bg-file').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => shrinkIfHuge(String(r.result), src => {
+      const opacity = bg ? bg.opacity : 0.5;
+      bg = { src, name: f.name, x: 0, y: 0, w: SHEET_W, opacity };
+      showBgImage(src, () => {
+        fitBg();
+        $('#bg-msg').textContent = saveBg() ? '' : 'This picture is too large for the browser to remember. It stays until you reload the page.';
+      });
+    });
+    r.readAsDataURL(f);
+  });
+  $('#bg-opacity').addEventListener('input', e => {
+    if (!bg) return;
+    bg.opacity = clamp(+e.target.value / 100, 0, 1);
+    $('#bg-opacity-val').textContent = Math.round(bg.opacity * 100) + '%';
+    requestRender();
+  });
+  $('#bg-opacity').addEventListener('change', () => saveBg());
+  for (const k of ['w', 'x', 'y']) {
+    const el = $('#bg-' + k);
+    el.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') el.blur(); });
+    el.addEventListener('change', () => {
+      const v = parseFloat(el.value);
+      if (bg && isFinite(v) && (k !== 'w' || v > 0)) { bg[k] = r2(v); saveBg(); requestRender(); }
+      refreshBgPanel();
+    });
+  }
+  $('#bg-fit').addEventListener('click', () => { if (bg && bgImg) { fitBg(); saveBg(); refreshBgPanel(); requestRender(); } });
+  $('#bg-remove').addEventListener('click', () => {
+    bg = null; bgImg = null; saveBg();
+    $('#bg-msg').textContent = '';
+    refreshBgPanel(); requestRender();
+  });
+
+  try {
+    const d = JSON.parse(localStorage.getItem(BG_KEY) || 'null');
+    if (d && typeof d.src === 'string' && /^data:image\//.test(d.src) && [d.x, d.y, d.w, d.opacity].every(n => typeof n === 'number' && isFinite(n)) && d.w > 0) {
+      bg = { src: d.src, name: String(d.name || 'Picture'), x: d.x, y: d.y, w: d.w, opacity: clamp(d.opacity, 0, 1) };
+      showBgImage(bg.src);
+    }
+  } catch (e) { /* storage unavailable */ }
 
   // ---- Save / open panel ----
   function openFile() {
