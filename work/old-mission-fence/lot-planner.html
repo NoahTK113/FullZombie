@@ -135,6 +135,8 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
 .bgpanel .field { grid-template-columns: 58px minmax(0, 1fr) 38px; }
 .bgpanel .row { align-items: center; }
 .field input[type="range"] { padding: 0; border: 0; background: none; accent-color: var(--accent); }
+.lockrow { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.lockrow input { accent-color: var(--accent); }
 .bg-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
 
 @media (max-width: 700px) {
@@ -222,6 +224,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
           <input id="bg-y" type="text" inputmode="decimal" autocomplete="off">
           <span class="unit">ft</span>
         </div>
+        <label class="lockrow" for="bg-lock"><input type="checkbox" id="bg-lock"> Lock picture so it can't be selected or moved</label>
         <div class="row" style="margin-top:6px">
           <button class="btn small" id="bg-fit">Fit to sheet</button>
           <button class="btn small" id="bg-remove">Remove</button>
@@ -316,6 +319,8 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   let pan = null, down = null, erasing = null, pinch = null, suppress = false;
   let move = null;         // Move tool: { id, start, orig, dx, dy, mode: 'press' | 'drag' | 'carry', sx, sy }
   let resize = null;       // Select tool handle drag: { id, orig, grab, moved }
+  let bgSel = false;       // background picture selected
+  let bgScale = null;      // background corner drag: { cx, cy, orig }
   let spaceHeld = false, textEdit = null, clearArmed = 0, anyAngle = false;
   let showGrid = true;
   try { showGrid = localStorage.getItem('lot-planner.grid') !== 'off'; } catch (e) { /* storage unavailable */ }
@@ -647,6 +652,19 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const pal = drawScene(ctx, view, cw, ch, true);
 
+    if (bgSel && bg && bgImg && (tool === 'select' || tool === 'move')) {
+      const cs = bgCorners();
+      ctx.save();
+      ctx.strokeStyle = pal.accent; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+      ctx.strokeRect(cs[0].x, cs[0].y, cs[2].x - cs[0].x, cs[2].y - cs[0].y);
+      ctx.restore();
+      if (tool === 'select') {
+        for (const c of cs) {
+          ctx.fillStyle = '#ffffff'; ctx.strokeStyle = pal.accent; ctx.lineWidth = 1.5;
+          ctx.fillRect(c.x - 4.5, c.y - 4.5, 9, 9); ctx.strokeRect(c.x - 4.5, c.y - 4.5, 9, 9);
+        }
+      }
+    }
     const sel = selected != null && (tool === 'select' || (tool === 'move' && move)) ? byId(selected) : null;
     if (sel) drawHighlight(ctx, sel, 'rgba(31,95,191,0.22)', pal.accent);
     if (hover != null && hover !== selected) {
@@ -657,7 +675,9 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       strokePts(ctx, stroke.pts.map(p => toS(view, p[0], p[1])), stroke.width, stroke.color);
       if (cursor) pill(ctx, fmtFt(pathLength(stroke.pts)), cursor.sx + 12, cursor.sy - 14, pal);
     }
-    if (cursor && (resize || move)) {
+    if (cursor && bgScale) pill(ctx, `${num2(bg.w)}' × ${num2(bgHeight())}'`, cursor.sx + 14, cursor.sy - 16, pal);
+    else if (cursor && move && move.bg) pill(ctx, moveText(move), cursor.sx + 14, cursor.sy - 16, pal);
+    else if (cursor && (resize || move)) {
       const s = byId(resize ? resize.id : move.id);
       if (s) pill(ctx, resize ? sizeText(s) : moveText(move), cursor.sx + 14, cursor.sy - 16, pal);
     }
@@ -900,13 +920,48 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     }
     if (dx === move.dx && dy === move.dy) return;
     move.dx = dx; move.dy = dy;
+    if (move.bg) { bg.x = r2(o.x + dx); bg.y = r2(o.y + dy); refreshBgPanel(); return; }
     replaceShape(translated(move.orig, dx, dy));
+  }
+
+  // ---- Background picture as a selectable, movable, scalable item ----
+  const bgUsable = () => !!(bg && bgImg && !bg.locked);
+  function bgCorners() {
+    const h = bgHeight();
+    return [[0, 0], [1, 0], [1, 1], [0, 1]].map(([cx, cy]) => ({ cx, cy, ...toS(view, bg.x + cx * bg.w, bg.y + cy * h) }));
+  }
+  function bgInside(sx, sy) {
+    if (!bgUsable()) return false;
+    const [P, , Q] = bgCorners();
+    return sx >= P.x && sx <= Q.x && sy >= P.y && sy <= Q.y;
+  }
+  function bgCornerAt(sx, sy) {
+    if (!bgSel || !bgUsable()) return null;
+    return bgCorners().find(c => Math.hypot(sx - c.x, sy - c.y) <= GRAB_PX) || null;
+  }
+  function selectBg() {
+    selected = null; bgSel = true;
+    bgPanel.hidden = false;
+    refreshPanel(); refreshBgPanel(); requestRender();
+  }
+  // Drag a corner: the opposite corner stays put and the aspect ratio is kept; width snaps to whole feet
+  function applyBgScale(w) {
+    const o = bgScale.orig, a = bgImg.naturalHeight / bgImg.naturalWidth;
+    const ax = bgScale.cx ? o.x : o.x + o.w, ay = bgScale.cy ? o.y : o.y + o.w * a;
+    const dirX = bgScale.cx ? 1 : -1, dirY = bgScale.cy ? 1 : -1;
+    const nw = Math.max(1, Math.round(Math.max((w.x - ax) * dirX, (w.y - ay) * dirY / a)));
+    bg.w = nw;
+    bg.x = r2(dirX > 0 ? ax : ax - nw);
+    bg.y = r2(dirY > 0 ? ay : ay - nw * a);
+    refreshBgPanel();
   }
 
   // Put back whatever a half-finished move or resize changed
   function abortEdits() {
+    if (move && move.bg) { bg.x = move.orig.x; bg.y = move.orig.y; move = null; refreshBgPanel(); }
     if (move) { replaceShape(move.orig); move = null; }
     if (resize) { replaceShape(resize.orig); resize = null; }
+    if (bgScale) { Object.assign(bg, bgScale.orig); bgScale = null; refreshBgPanel(); }
     canvas.style.cursor = '';
   }
 
@@ -1049,6 +1104,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   // ---- Selection panel ----
   function select(id) {
     selected = id;
+    bgSel = false;
     refreshPanel();
     requestRender();
   }
@@ -1155,8 +1211,8 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
 
   // ---- Tools ----
   const HINTS = {
-    select: 'Click an item to select it and type exact sizes. Drag line ends, or rectangle corners and edges, to resize in 1 ft steps. Drag empty space to pan. Scroll or pinch to zoom.',
-    move: 'Drag an item to move it in 1 ft steps, or click it, move, and click again to place it. Drag empty space to pan.',
+    select: 'Click an item to select it and type exact sizes. Drag ends, corners or edges to resize in 1 ft steps, including the background picture. Drag empty space to pan.',
+    move: 'Drag an item or the background picture to move it in 1 ft steps, or click it, move, and click again to place it. Drag empty space to pan.',
     line: 'Drag, or click corner to corner, to draw straight lines snapped to 1 ft and kept level or plumb. Hold Shift for any angle.',
     rect: 'Drag, or click two corners, to draw a rectangle snapped to 1 ft. Hold Shift for a square.',
     dot: 'Click to place a point. Near a line it snaps every 1 ft along the line, measured from where the line starts; elsewhere it snaps to the 1 ft grid.',
@@ -1170,7 +1226,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     if (textEdit) closeTextEdit(true);
     chain = null; rectStart = null; dimStart = null; dimPick = null; stroke = null; hover = null;
     abortEdits();
-    if (t !== 'select') selected = null;
+    if (t !== 'select') { selected = null; bgSel = false; }
     tool = t;
     canvas.dataset.tool = t;
     canvas.classList.remove('over');
@@ -1370,6 +1426,8 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     }
     if (e.button !== 0) return;
     if (tool === 'select') {
+      const bc = bgCornerAt(p.x, p.y);
+      if (bc) { bgScale = { cx: bc.cx, cy: bc.cy, orig: { x: bg.x, y: bg.y, w: bg.w } }; return; }
       const h = hitTest(p.x, p.y);
       const g = h && (h.type === 'text' || h.type === 'dot') ? null : grabAt(p.x, p.y);
       if (g) {
@@ -1378,7 +1436,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       } else if (h) {
         select(h.id);
       } else {
-        pan = { sx: p.x, sy: p.y, ox: view.ox, oy: view.oy, deselect: true };
+        pan = { sx: p.x, sy: p.y, ox: view.ox, oy: view.oy, deselect: true, onBg: bgInside(p.x, p.y) };
         canvas.style.cursor = '';
         canvas.classList.add('panning');
       }
@@ -1390,6 +1448,10 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       if (h) {
         selected = h.id;
         move = { id: h.id, start: w, orig: clone(h), dx: 0, dy: 0, mode: 'press', sx: p.x, sy: p.y };
+        requestRender();
+      } else if (bgInside(p.x, p.y)) {
+        bgSel = true;
+        move = { bg: true, start: w, orig: { x: bg.x, y: bg.y }, dx: 0, dy: 0, mode: 'press', sx: p.x, sy: p.y };
         requestRender();
       } else {
         pan = { sx: p.x, sy: p.y, ox: view.ox, oy: view.oy, deselect: false };
@@ -1418,6 +1480,8 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       view.ox = pan.ox + p.x - pan.sx;
       view.oy = pan.oy + p.y - pan.sy;
       if (Math.hypot(p.x - pan.sx, p.y - pan.sy) > 4) pan.deselect = false;
+    } else if (bgScale) {
+      applyBgScale(w);
     } else if (resize) {
       if (!resize.moved && Math.hypot(p.x - resize.sx, p.y - resize.sy) > 3) resize.moved = true;
       if (resize.moved) applyResize(w, e.shiftKey);
@@ -1430,15 +1494,17 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     } else if (erasing) {
       eraseAt(p.x, p.y);
     }
-    if (pan || move || resize || suppress) hover = null;
+    if (pan || move || resize || bgScale || suppress) hover = null;
     else if (tool === 'erase' || tool === 'select' || tool === 'move') hover = hitTest(p.x, p.y)?.id ?? null;
     else if (tool === 'text') hover = hitTest(p.x, p.y, s => s.type === 'text')?.id ?? null;
     else if (tool === 'dim' && !dimStart && !dimPick && !down) hover = hitTest(p.x, p.y, s => s.type === 'dim')?.id ?? null;
     else hover = null;
-    canvas.classList.toggle('over', (tool === 'select' || tool === 'move') && (hover != null || !!move));
+    canvas.classList.toggle('over', (tool === 'select' || tool === 'move') && (hover != null || !!move || (tool === 'move' && bgInside(p.x, p.y))));
     if (tool === 'select' && !pan) {
       const hs = hover != null ? byId(hover) : null;
-      canvas.style.cursor = grabCursor(resize ? resize.grab : (hs && (hs.type === 'text' || hs.type === 'dot') ? null : grabAt(p.x, p.y)));
+      const bc = bgScale || bgCornerAt(p.x, p.y);
+      canvas.style.cursor = bc ? (bc.cx === bc.cy ? 'nwse-resize' : 'nesw-resize')
+        : grabCursor(resize ? resize.grab : (hs && (hs.type === 'text' || hs.type === 'dot') ? null : grabAt(p.x, p.y)));
     }
     updateStatus(); requestRender();
   });
@@ -1450,8 +1516,13 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     if (pinch) { if (pointers.size < 2) { pinch = null; suppress = pointers.size > 0; } return; }
     if (suppress) { if (pointers.size === 0) suppress = false; return; }
     if (pan) {
-      if (pan.deselect) select(null);
+      if (pan.deselect) { if (pan.onBg) selectBg(); else select(null); }
       pan = null; canvas.classList.remove('panning');
+      return;
+    }
+    if (bgScale) {
+      bgScale = null;
+      saveBg(); refreshBgPanel(); requestRender();
       return;
     }
     if (resize) {
@@ -1465,6 +1536,12 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       if (move.mode === 'press') { move.mode = 'carry'; updateStatus(); requestRender(); return; }
       updateMove(toWorld(p.x, p.y));
       const moved = move.dx || move.dy;
+      if (move.bg) {
+        move = null; bgSel = false;
+        if (moved) saveBg();
+        refreshBgPanel(); updateStatus(); requestRender();
+        return;
+      }
       move = null; selected = null;
       if (moved) commit(); else requestRender();
       updateStatus();
@@ -1525,14 +1602,21 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       return;
     }
     if (e.key === 'Escape') {
-      if (move || resize) { abortEdits(); if (tool === 'move') selected = null; }
+      if (move || resize || bgScale) { abortEdits(); if (tool === 'move') { selected = null; bgSel = false; } }
       else if (chain || rectStart || dimStart || dimPick || stroke) { chain = null; rectStart = null; dimStart = null; dimPick = null; stroke = null; }
-      else if (tool === 'select') select(null);
+      else if (tool === 'select') { select(null); }
       else setTool('select');
       updateStatus(); requestRender();
       return;
     }
     if (e.key === 'Enter') { if (chain) { chain = null; updateStatus(); requestRender(); } return; }
+    if (tool === 'select' && bgSel && bgUsable() && NUDGE[e.key]) {
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      bg.x = r2(bg.x + NUDGE[e.key][0] * step); bg.y = r2(bg.y + NUDGE[e.key][1] * step);
+      saveBg(); refreshBgPanel(); requestRender();
+      return;
+    }
     if (tool === 'select' && selected != null) {
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeShape(selected); commit(); return; }
       if (NUDGE[e.key]) {
@@ -1652,6 +1736,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     $('#bg-name').textContent = bg ? bg.name : 'No picture yet';
     $('#bg-btn').setAttribute('aria-pressed', String(!bgPanel.hidden));
     if (!bg) return;
+    $('#bg-lock').checked = !!bg.locked;
     const pct = Math.round(bg.opacity * 100);
     $('#bg-opacity').value = pct;
     $('#bg-opacity-val').textContent = pct + '%';
@@ -1718,9 +1803,15 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       refreshBgPanel();
     });
   }
+  $('#bg-lock').addEventListener('change', e => {
+    if (!bg) return;
+    bg.locked = e.target.checked;
+    if (bg.locked) bgSel = false;
+    saveBg(); requestRender();
+  });
   $('#bg-fit').addEventListener('click', () => { if (bg && bgImg) { fitBg(); saveBg(); refreshBgPanel(); requestRender(); } });
   $('#bg-remove').addEventListener('click', () => {
-    bg = null; bgImg = null; saveBg();
+    bg = null; bgImg = null; bgSel = false; saveBg();
     $('#bg-msg').textContent = '';
     refreshBgPanel(); requestRender();
   });
@@ -1728,7 +1819,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   try {
     const d = JSON.parse(localStorage.getItem(BG_KEY) || 'null');
     if (d && typeof d.src === 'string' && /^data:image\//.test(d.src) && [d.x, d.y, d.w, d.opacity].every(n => typeof n === 'number' && isFinite(n)) && d.w > 0) {
-      bg = { src: d.src, name: String(d.name || 'Picture'), x: d.x, y: d.y, w: d.w, opacity: clamp(d.opacity, 0, 1) };
+      bg = { src: d.src, name: String(d.name || 'Picture'), x: d.x, y: d.y, w: d.w, opacity: clamp(d.opacity, 0, 1), locked: !!d.locked };
       showBgImage(bg.src);
     }
   } catch (e) { /* storage unavailable */ }
