@@ -1,0 +1,1081 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lot Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen drafting table. Tool rail on top, the plan sheet fills the middle, a status strip below. */
+:root {
+  --bg: #e6eaec;
+  --panel: #f6f7f7;
+  --hover: #e3e8eb;
+  --ink: #1d2a33;
+  --muted: #5b6a74;
+  --line: #c9d1d6;
+  --accent: #1f5f8b;
+  --accent-ink: #ffffff;
+  --danger: #a8322d;
+  --scrim: rgba(17, 26, 32, 0.55);
+  --sheet: #fbfbf8;
+  --font-ui: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-plan: "Architects Daughter", "Comic Sans MS", cursive;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10171c; --panel: #19222a; --hover: #24303a; --ink: #e2e8eb; --muted: #93a2ac;
+    --line: #2d3a44; --accent: #6db0de; --accent-ink: #0c1820; --danger: #e8837c; --scrim: rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10171c; --panel: #19222a; --hover: #24303a; --ink: #e2e8eb; --muted: #93a2ac;
+  --line: #2d3a44; --accent: #6db0de; --accent-ink: #0c1820; --danger: #e8837c; --scrim: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+html { box-sizing: border-box; height: 100%; }
+*, *::before, *::after { box-sizing: inherit; }
+[hidden] { display: none !important; }
+body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--ink); font: 14px/1.3 var(--font-ui); }
+
+.app { height: 100%; display: flex; flex-direction: column; }
+
+.bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding-block: 8px; padding-inline: 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 600; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.glabel { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+
+.btn {
+  font: inherit; font-weight: 500; color: var(--ink); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; min-height: 32px;
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: var(--hover); }
+.btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn:disabled { opacity: 0.4; cursor: default; background: transparent; }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn:focus-visible, .swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+kbd { font: 500 10px var(--font-data); opacity: 0.6; }
+
+.swatch {
+  width: 26px; height: 26px; padding: 0; border-radius: 50%; cursor: pointer;
+  background: var(--c); border: 3px solid var(--panel); box-shadow: 0 0 0 1px var(--line);
+}
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
+.weight i { display: block; width: 20px; border-radius: 2px; background: currentColor; }
+
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+#plan { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#plan[data-tool="pan"], #plan.space { cursor: grab; }
+#plan.panning { cursor: grabbing; }
+#plan[data-tool="line"], #plan[data-tool="free"], #plan[data-tool="dim"] { cursor: crosshair; }
+#plan[data-tool="text"] { cursor: text; }
+#plan[data-tool="erase"] { cursor: cell; }
+
+.text-input {
+  position: absolute; z-index: 2; margin: 0; padding: 0 4px; line-height: 1.5;
+  font-family: var(--font-plan); background: var(--sheet);
+  border: 1px dashed var(--accent); border-radius: 3px; outline: none;
+}
+
+.status {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px;
+  padding-block: 6px; padding-inline: 16px;
+  background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px;
+}
+.status .data { font-family: var(--font-data); font-variant-numeric: tabular-nums; color: var(--ink); }
+#st-hint { flex: 1 1 280px; min-width: 0; }
+
+.overlay { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: var(--scrim); padding: 16px; }
+.panel {
+  width: 100%; max-width: 760px; max-height: 100%; overflow: auto;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+  padding: 20px; display: flex; flex-direction: column; gap: 18px;
+}
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.panel h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.panel h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.panel section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.panel img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; background: #ffffff; }
+.note { margin: 0; color: var(--muted); max-width: 65ch; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+#plan-json { width: 100%; font: 12px/1.4 var(--font-data); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
+
+@media (max-width: 700px) {
+  kbd, .brand { display: none; }
+  .bar { gap: 6px 10px; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="bar" role="toolbar" aria-label="Drawing tools">
+    <span class="brand">Lot Planner</span>
+    <div class="group" id="tools">
+      <button class="btn" id="tool-pan" data-tool="pan" title="Pan: drag to move (V or Esc)">Pan <kbd>V</kbd></button>
+      <button class="btn" id="tool-line" data-tool="line" title="Straight line, 1 ft snap (L)">Line <kbd>L</kbd></button>
+      <button class="btn" id="tool-free" data-tool="free" title="Freehand (F)">Freehand <kbd>F</kbd></button>
+      <button class="btn" id="tool-dim" data-tool="dim" title="Dimension a line (D)">Dimension <kbd>D</kbd></button>
+      <button class="btn" id="tool-text" data-tool="text" title="Text label (T)">Text <kbd>T</kbd></button>
+      <button class="btn" id="tool-erase" data-tool="erase" title="Erase (E)">Erase <kbd>E</kbd></button>
+    </div>
+    <div class="group" id="colors" role="group" aria-label="Color"></div>
+    <div class="group" role="group" aria-label="Line weight">
+      <span class="glabel">Line</span>
+      <button class="btn weight" id="w-thin" data-w="thin" title="Thin line" aria-label="Thin line"><i style="height:1px"></i></button>
+      <button class="btn weight" id="w-med" data-w="med" title="Medium line" aria-label="Medium line"><i style="height:2.5px"></i></button>
+      <button class="btn weight" id="w-bold" data-w="bold" title="Bold line" aria-label="Bold line"><i style="height:4.5px"></i></button>
+    </div>
+    <div class="group" role="group" aria-label="Text size">
+      <span class="glabel">Text</span>
+      <button class="btn" id="s-S" data-size="S" title="Small text, 3 ft tall">S</button>
+      <button class="btn" id="s-M" data-size="M" title="Medium text, 6 ft tall">M</button>
+      <button class="btn" id="s-L" data-size="L" title="Large text, 12 ft tall">L</button>
+    </div>
+    <div class="group">
+      <button class="btn" id="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button class="btn" id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      <button class="btn" id="fit" title="Fit the sheet in view (0)">Fit <kbd>0</kbd></button>
+      <button class="btn" id="file" title="Save a picture or move the plan">Save / Open</button>
+      <button class="btn" id="clear" title="Delete everything on the sheet">Clear</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <canvas id="plan" aria-label="Lot plan drawing sheet, 200 by 150 meters"></canvas>
+    <input id="text-input" class="text-input" type="text" hidden autocomplete="off" spellcheck="false" aria-label="Label text">
+  </main>
+
+  <footer class="status">
+    <span>Cursor <span class="data" id="st-pos">–</span></span>
+    <span>Zoom <span class="data" id="st-zoom">100%</span></span>
+    <span id="st-hint"></span>
+  </footer>
+</div>
+
+<div class="overlay" id="file-panel" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="file-title">
+    <div class="panel-head">
+      <h2 id="file-title">Save or open a plan</h2>
+      <button class="btn" id="file-close">Close</button>
+    </div>
+    <section>
+      <h3>Picture of the sheet</h3>
+      <img id="snap" alt="Picture of the full plan sheet">
+      <p class="note">Right-click the picture and choose Save, or press and hold it on a phone.</p>
+    </section>
+    <section>
+      <h3>Plan data</h3>
+      <p class="note">The plan saves automatically in this browser. To keep a backup or move it to another device, copy this text, then paste it back here and press Load.</p>
+      <textarea id="plan-json" rows="6" spellcheck="false" aria-label="Plan data"></textarea>
+      <div class="row">
+        <button class="btn" id="copy-json">Copy</button>
+        <button class="btn" id="load-json">Load pasted plan</button>
+        <label class="btn" for="open-file">Open .json file</label>
+        <input type="file" id="open-file" accept=".json,application/json,text/plain" hidden>
+      </div>
+      <p class="note" id="file-msg" role="status"></p>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---- Units and constants (world units are feet) ----
+  const FT_PER_M = 1 / 0.3048;
+  const SHEET_W = 200 * FT_PER_M;   // 656.17 ft
+  const SHEET_H = 150 * FT_PER_M;   // 492.13 ft
+  const MAX_X = Math.floor(SHEET_W), MAX_Y = Math.floor(SHEET_H);
+  const COLORS = [
+    { name: 'Ink', v: '#1d2a33' }, { name: 'Red', v: '#c62f28' }, { name: 'Blue', v: '#1f5fbf' },
+    { name: 'Green', v: '#2f7d32' }, { name: 'Orange', v: '#df7800' }, { name: 'Purple', v: '#7a3fa2' },
+    { name: 'Brown', v: '#7b5231' }
+  ];
+  const WIDTHS = { thin: 1.25, med: 2.5, bold: 4.5 };      // screen px
+  const SIZES = { S: 3, M: 6, L: 12 };                       // text height in ft
+  const STORE_KEY = 'lot-planner.v1';
+  const HIT_PX = 7;
+  const SHEET = '#fbfbf8';
+  const PLAN_FONT = '"Architects Daughter", "Comic Sans MS", cursive';
+  const DATA_FONT = '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace';
+  const EXPORT_PAL = { bg: '#ffffff', muted: '#5b6a74', ink: '#1d2a33', panel: '#f6f7f7', accent: '#1f5f8b' };
+
+  const $ = s => document.querySelector(s);
+  const stage = $('#stage'), canvas = $('#plan'), ctx = canvas.getContext('2d');
+  const mctx = document.createElement('canvas').getContext('2d');
+  const textInput = $('#text-input'), filePanel = $('#file-panel');
+
+  // ---- State ----
+  let shapes = [], nextId = 1;
+  let history = [], hIdx = -1;
+  const view = { s: 1, ox: 0, oy: 0 };
+  let cw = 0, ch = 0, fitted = false;
+  let tool = 'pan', color = COLORS[0].v, widthKey = 'med', sizeKey = 'M';
+  let chain = null;        // line in progress: { last: {x,y} }
+  let stroke = null;       // freehand in progress
+  let dimPending = null;   // { lineId, off }
+  let cursor = null;       // { sx, sy, w, shift }
+  let hover = null;        // id of highlighted shape
+  let pan = null, down = null, erasing = null, pinch = null, suppress = false;
+  let spaceHeld = false, textEdit = null, clearArmed = 0;
+  const pointers = new Map();
+
+  // ---- Helpers ----
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const r2 = v => Math.round(v * 100) / 100;
+  const byId = id => shapes.find(s => s.id === id);
+  const toWorld = (sx, sy) => ({ x: (sx - view.ox) / view.s, y: (sy - view.oy) / view.s });
+  const toS = (v, x, y) => ({ x: v.ox + x * v.s, y: v.oy + y * v.s });
+  const textPx = (size, s) => Math.max(8, size * s);
+  const snapPt = w => ({ x: clamp(Math.round(w.x), 0, MAX_X), y: clamp(Math.round(w.y), 0, MAX_Y) });
+  const fitScale = () => Math.max(0.05, Math.min((cw - 56) / SHEET_W, (ch - 56) / SHEET_H));
+
+  function constrain(from, w, free) {
+    const q = snapPt(w);
+    if (free || !from) return q;
+    return Math.abs(q.x - from.x) >= Math.abs(q.y - from.y) ? { x: q.x, y: from.y } : { x: from.x, y: q.y };
+  }
+
+  function fmtLen(ft) {
+    const inches = Math.round(ft * 12);
+    const f = Math.floor(inches / 12), i = inches % 12;
+    return i ? `${f}' ${i}"` : `${f}'`;
+  }
+
+  function distSeg(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    const t = l2 ? clamp(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1) : 0;
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  function lineGeom(L) {
+    if (!L || L.type !== 'line') return null;
+    const len = Math.hypot(L.b.x - L.a.x, L.b.y - L.a.y);
+    if (len < 1e-6) return null;
+    const ux = (L.b.x - L.a.x) / len, uy = (L.b.y - L.a.y) / len;
+    return { ax: L.a.x, ay: L.a.y, bx: L.b.x, by: L.b.y, len, ux, uy, nx: -uy, ny: ux };
+  }
+
+  function dimScreen(v, g, off) {
+    const As = toS(v, g.ax, g.ay), Bs = toS(v, g.bx, g.by), o = off * v.s;
+    return { As, Bs, o, Ds: { x: As.x + g.nx * o, y: As.y + g.ny * o }, Es: { x: Bs.x + g.nx * o, y: Bs.y + g.ny * o } };
+  }
+
+  function dimOffset(lineId, w) {
+    const g = lineGeom(byId(lineId));
+    return g ? Math.round((w.x - g.ax) * g.nx + (w.y - g.ay) * g.ny) : 0;
+  }
+
+  function dimAngle(g) {
+    let a = Math.atan2(g.uy, g.ux);
+    if (a >= Math.PI / 2 - 1e-6) a -= Math.PI;
+    else if (a < -Math.PI / 2 - 1e-6) a += Math.PI;
+    return a;
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h);
+  }
+
+  function themePalette() {
+    const cs = getComputedStyle(document.documentElement);
+    const g = n => cs.getPropertyValue(n).trim();
+    return { bg: g('--bg'), muted: g('--muted'), ink: g('--ink'), panel: g('--panel'), accent: g('--accent') };
+  }
+
+  // ---- Drawing ----
+  function strokePts(c, pts, width, col) {
+    c.strokeStyle = col; c.lineWidth = width; c.lineCap = 'round'; c.lineJoin = 'round';
+    c.beginPath();
+    pts.forEach((p, i) => i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y));
+    c.stroke();
+  }
+
+  function shapePts(v, s) {
+    if (s.type === 'line') return [toS(v, s.a.x, s.a.y), toS(v, s.b.x, s.b.y)];
+    return s.pts.map(p => toS(v, p[0], p[1]));
+  }
+
+  function drawDim(c, v, s, offOverride) {
+    const g = lineGeom(byId(s.line));
+    if (!g) return;
+    const d = dimScreen(v, g, offOverride ?? s.off);
+    const sg = d.o >= 0 ? 1 : -1;
+    c.strokeStyle = s.color; c.lineWidth = 1; c.lineCap = 'butt';
+    c.beginPath();
+    if (Math.abs(d.o) > 5) {
+      for (const P of [d.As, d.Bs]) {
+        c.moveTo(P.x + g.nx * sg * 4, P.y + g.ny * sg * 4);
+        c.lineTo(P.x + g.nx * (d.o + sg * 6), P.y + g.ny * (d.o + sg * 6));
+      }
+    }
+    c.moveTo(d.Ds.x, d.Ds.y); c.lineTo(d.Es.x, d.Es.y);
+    c.stroke();
+    // Architectural slash ticks at each end
+    const tx = (g.ux + g.nx) * 0.7071 * 5, ty = (g.uy + g.ny) * 0.7071 * 5;
+    c.lineWidth = 1.8;
+    c.beginPath();
+    for (const P of [d.Ds, d.Es]) { c.moveTo(P.x - tx, P.y - ty); c.lineTo(P.x + tx, P.y + ty); }
+    c.stroke();
+    const fs = textPx(s.size, v.s), label = fmtLen(g.len);
+    c.save();
+    c.translate((d.Ds.x + d.Es.x) / 2, (d.Ds.y + d.Es.y) / 2);
+    c.rotate(dimAngle(g));
+    c.font = `${fs}px ${PLAN_FONT}`;
+    const tw = c.measureText(label).width;
+    c.fillStyle = SHEET; c.fillRect(-tw / 2 - 3, -fs * 0.55, tw + 6, fs * 1.1);
+    c.fillStyle = s.color; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(label, 0, fs * 0.05);
+    c.restore();
+  }
+
+  function drawText(c, v, s) {
+    const p = toS(v, s.x, s.y), fs = textPx(s.size, v.s);
+    c.font = `${fs}px ${PLAN_FONT}`;
+    c.fillStyle = s.color; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillText(s.text, p.x, p.y);
+  }
+
+  function drawShapes(c, v) {
+    for (const s of shapes) if (s.type === 'line' || s.type === 'free') strokePts(c, shapePts(v, s), s.width, s.color);
+    for (const s of shapes) if (s.type === 'dim') drawDim(c, v, s);
+    for (const s of shapes) if (s.type === 'text' && !(textEdit && textEdit.id === s.id)) drawText(c, v, s);
+  }
+
+  function drawGrid(c, v, W, H) {
+    const x0 = Math.max(0, -v.ox / v.s), x1 = Math.min(SHEET_W, (W - v.ox) / v.s);
+    const y0 = Math.max(0, -v.oy / v.s), y1 = Math.min(SHEET_H, (H - v.oy) / v.s);
+    if (x1 <= x0 || y1 <= y0) return;
+    const top = v.oy + y0 * v.s, bot = v.oy + y1 * v.s, left = v.ox + x0 * v.s, right = v.ox + x1 * v.s;
+    for (const [step, alpha] of [[1, 0.09], [10, 0.2], [100, 0.38]]) {
+      const fade = clamp((step * v.s - 4) / 14, 0, 1);
+      if (!fade) continue;
+      c.strokeStyle = `rgba(31,95,139,${(alpha * fade).toFixed(3)})`;
+      c.lineWidth = 1;
+      c.beginPath();
+      for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) {
+        if (step < 100 && x % (step * 10) === 0) continue;
+        const X = Math.round(v.ox + x * v.s) + 0.5;
+        c.moveTo(X, top); c.lineTo(X, bot);
+      }
+      for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) {
+        if (step < 100 && y % (step * 10) === 0) continue;
+        const Y = Math.round(v.oy + y * v.s) + 0.5;
+        c.moveTo(left, Y); c.lineTo(right, Y);
+      }
+      c.stroke();
+    }
+  }
+
+  function drawRulers(c, v, W, H, pal) {
+    const step = [10, 25, 50, 100, 200].find(s => s * v.s >= 48) || 200;
+    c.fillStyle = pal.muted;
+    c.font = `500 11px ${DATA_FONT}`;
+    const yTop = v.oy - 7;
+    if (yTop > 12) {
+      c.textAlign = 'center'; c.textBaseline = 'bottom';
+      for (let x = 0; x <= SHEET_W; x += step) {
+        const X = v.ox + x * v.s;
+        if (X > -40 && X < W + 40) c.fillText(`${x}'`, X, yTop);
+      }
+    }
+    const xL = v.ox - 7;
+    if (xL > 30) {
+      c.textAlign = 'right'; c.textBaseline = 'middle';
+      for (let y = 0; y <= SHEET_H; y += step) {
+        const Y = v.oy + y * v.s;
+        if (Y > -20 && Y < H + 20) c.fillText(`${y}'`, xL, Y);
+      }
+    }
+    const capY = v.oy + SHEET_H * v.s + 9;
+    if (capY < H - 6) {
+      c.textAlign = 'left'; c.textBaseline = 'top';
+      c.fillText(`Sheet 200 m × 150 m  (656' × 492')   Grid 10' and 100'`, Math.max(v.ox, 8), capY);
+    }
+  }
+
+  function drawScene(c, v, W, H, live) {
+    const pal = live ? themePalette() : EXPORT_PAL;
+    c.fillStyle = pal.bg; c.fillRect(0, 0, W, H);
+    c.save();
+    if (live) { c.shadowColor = 'rgba(10,20,28,0.25)'; c.shadowBlur = 18; c.shadowOffsetY = 4; }
+    c.fillStyle = SHEET; c.fillRect(v.ox, v.oy, SHEET_W * v.s, SHEET_H * v.s);
+    c.restore();
+    drawGrid(c, v, W, H);
+    c.strokeStyle = 'rgba(29,42,51,0.75)'; c.lineWidth = 1.5;
+    c.strokeRect(v.ox, v.oy, SHEET_W * v.s, SHEET_H * v.s);
+    drawRulers(c, v, W, H, pal);
+    drawShapes(c, v);
+    return pal;
+  }
+
+  function pill(c, text, x, y, pal) {
+    c.font = `500 12px ${DATA_FONT}`;
+    const tw = c.measureText(text).width;
+    c.fillStyle = pal.ink; roundRect(c, x, y - 10, tw + 12, 20, 4); c.fill();
+    c.fillStyle = pal.panel; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillText(text, x + 6, y + 0.5);
+  }
+
+  function drawScaleBar(c, pal) {
+    const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find(s => s * view.s >= 70) || 500;
+    const len = step * view.s, x = 16, y = ch - 16, label = `${step} ft`;
+    c.font = `500 11px ${DATA_FONT}`;
+    const tw = c.measureText(label).width;
+    c.save();
+    c.globalAlpha = 0.92; c.fillStyle = pal.panel;
+    roundRect(c, x - 8, y - 20, len + tw + 26, 28, 5); c.fill();
+    c.restore();
+    c.strokeStyle = pal.ink; c.lineWidth = 1.5;
+    c.beginPath();
+    c.moveTo(x, y - 10); c.lineTo(x, y - 2); c.lineTo(x + len, y - 2); c.lineTo(x + len, y - 10);
+    c.moveTo(x + len / 2, y - 2); c.lineTo(x + len / 2, y - 7);
+    c.stroke();
+    c.fillStyle = pal.ink; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillText(label, x + len + 8, y - 6);
+  }
+
+  function drawHighlight(c, s, col) {
+    if (s.type === 'line' || s.type === 'free') { strokePts(c, shapePts(view, s), s.width + 9, col); return; }
+    if (s.type === 'text') {
+      const p = toS(view, s.x, s.y), fs = textPx(s.size, view.s);
+      mctx.font = `${fs}px ${PLAN_FONT}`;
+      const tw = mctx.measureText(s.text).width;
+      c.fillStyle = col; roundRect(c, p.x - 4, p.y - fs * 0.65, tw + 8, fs * 1.3, 4); c.fill();
+      return;
+    }
+    if (s.type === 'dim') {
+      const g = lineGeom(byId(s.line));
+      if (!g) return;
+      const d = dimScreen(view, g, s.off);
+      strokePts(c, [d.Ds, d.Es], 12, col);
+    }
+  }
+
+  function render() {
+    if (!cw || !ch) return;
+    const dpr = canvas.width / cw;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const pal = drawScene(ctx, view, cw, ch, true);
+
+    if (hover != null) {
+      const s = byId(hover);
+      if (s) drawHighlight(ctx, s, tool === 'erase' ? 'rgba(198,47,40,0.28)' : 'rgba(31,95,191,0.25)');
+    }
+    if (stroke) strokePts(ctx, stroke.pts.map(p => toS(view, p[0], p[1])), stroke.width, stroke.color);
+
+    if (dimPending) {
+      const L = byId(dimPending.lineId);
+      if (L) {
+        ctx.save(); ctx.globalAlpha = 0.75;
+        drawDim(ctx, view, { line: L.id, off: dimPending.off, color, size: SIZES[sizeKey] });
+        ctx.restore();
+      }
+    }
+
+    if (tool === 'line' && (cursor || chain)) {
+      const P = cursor ? (chain ? constrain(chain.last, cursor.w, cursor.shift) : snapPt(cursor.w)) : null;
+      if (chain) {
+        const a = toS(view, chain.last.x, chain.last.y);
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(a.x, a.y, 3.5, 0, Math.PI * 2); ctx.fill();
+        if (P) {
+          const b = toS(view, P.x, P.y);
+          ctx.save(); ctx.globalAlpha = 0.7; ctx.setLineDash([7, 5]);
+          strokePts(ctx, [a, b], WIDTHS[widthKey], color);
+          ctx.restore();
+          const len = Math.hypot(P.x - chain.last.x, P.y - chain.last.y);
+          if (len > 0) pill(ctx, fmtLen(len), b.x + 12, b.y - 14, pal);
+        }
+      }
+      if (P) {
+        const b = toS(view, P.x, P.y);
+        ctx.strokeStyle = pal.accent; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+        ctx.moveTo(b.x - 9, b.y); ctx.lineTo(b.x - 6, b.y); ctx.moveTo(b.x + 6, b.y); ctx.lineTo(b.x + 9, b.y);
+        ctx.moveTo(b.x, b.y - 9); ctx.lineTo(b.x, b.y - 6); ctx.moveTo(b.x, b.y + 6); ctx.lineTo(b.x, b.y + 9);
+        ctx.stroke();
+      }
+    }
+
+    drawScaleBar(ctx, pal);
+    positionTextInput();
+  }
+
+  let raf = 0;
+  function requestRender() {
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); });
+  }
+
+  // ---- Hit testing ----
+  function hitShape(s, sx, sy) {
+    if (s.type === 'line' || s.type === 'free') {
+      const pts = shapePts(view, s), tol = HIT_PX + s.width / 2;
+      if (pts.length === 1) return Math.hypot(sx - pts[0].x, sy - pts[0].y) <= tol;
+      for (let i = 1; i < pts.length; i++) {
+        if (distSeg(sx, sy, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y) <= tol) return true;
+      }
+      return false;
+    }
+    if (s.type === 'text') {
+      const p = toS(view, s.x, s.y), fs = textPx(s.size, view.s);
+      mctx.font = `${fs}px ${PLAN_FONT}`;
+      const tw = mctx.measureText(s.text).width;
+      return sx >= p.x - 4 && sx <= p.x + tw + 4 && sy >= p.y - fs * 0.65 && sy <= p.y + fs * 0.65;
+    }
+    if (s.type === 'dim') {
+      const g = lineGeom(byId(s.line));
+      if (!g) return false;
+      const d = dimScreen(view, g, s.off);
+      if (distSeg(sx, sy, d.Ds.x, d.Ds.y, d.Es.x, d.Es.y) <= HIT_PX) return true;
+      const fs = textPx(s.size, view.s);
+      return Math.hypot(sx - (d.Ds.x + d.Es.x) / 2, sy - (d.Ds.y + d.Es.y) / 2) <= Math.max(fs, 10);
+    }
+    return false;
+  }
+
+  function hitTest(sx, sy, filter) {
+    const groups = [s => s.type === 'text', s => s.type === 'dim', s => s.type === 'line' || s.type === 'free'];
+    for (const inGroup of groups) {
+      for (let i = shapes.length - 1; i >= 0; i--) {
+        const s = shapes[i];
+        if (!inGroup(s) || (filter && !filter(s)) || (textEdit && s.id === textEdit.id)) continue;
+        if (hitShape(s, sx, sy)) return s;
+      }
+    }
+    return null;
+  }
+
+  function removeShape(id) {
+    shapes = shapes.filter(s => s.id !== id && !(s.type === 'dim' && s.line === id));
+  }
+
+  // ---- History and storage ----
+  function snapshot() { return JSON.stringify({ app: 'lot-planner', version: 1, shapes, nextId }); }
+
+  function commit() {
+    history = history.slice(0, hIdx + 1);
+    history.push(snapshot());
+    if (history.length > 300) history.shift();
+    hIdx = history.length - 1;
+    save(); updateButtons(); requestRender();
+  }
+
+  function restore() {
+    const d = JSON.parse(history[hIdx]);
+    shapes = d.shapes; nextId = d.nextId;
+    hover = null;
+    save(); updateButtons(); requestRender();
+  }
+
+  function cancelOps() {
+    chain = null; dimPending = null; stroke = null; erasing = null;
+    if (textEdit) closeTextEdit(false);
+  }
+
+  function undo() { cancelOps(); if (hIdx > 0) { hIdx--; restore(); } }
+  function redo() { cancelOps(); if (hIdx < history.length - 1) { hIdx++; restore(); } }
+
+  function save() { try { localStorage.setItem(STORE_KEY, history[hIdx]); } catch (e) { /* storage unavailable */ } }
+
+  function sanitize(d) {
+    if (!d || !Array.isArray(d.shapes)) return null;
+    const num = v => typeof v === 'number' && isFinite(v);
+    const isPt = o => o && num(o.x) && num(o.y);
+    const out = [];
+    let maxId = 0;
+    for (const s of d.shapes) {
+      if (!s || !num(s.id)) continue;
+      const col = typeof s.color === 'string' && /^#[0-9a-f]{3,8}$/i.test(s.color) ? s.color : COLORS[0].v;
+      const width = num(s.width) ? clamp(s.width, 0.5, 12) : WIDTHS.med;
+      const size = num(s.size) ? clamp(s.size, 1, 50) : SIZES.M;
+      if (s.type === 'line' && isPt(s.a) && isPt(s.b)) {
+        out.push({ id: s.id, type: 'line', a: { x: s.a.x, y: s.a.y }, b: { x: s.b.x, y: s.b.y }, color: col, width });
+      } else if (s.type === 'free' && Array.isArray(s.pts) && s.pts.length > 1 &&
+                 s.pts.every(p => Array.isArray(p) && num(p[0]) && num(p[1]))) {
+        out.push({ id: s.id, type: 'free', pts: s.pts.map(p => [p[0], p[1]]), color: col, width });
+      } else if (s.type === 'dim' && num(s.line) && num(s.off)) {
+        out.push({ id: s.id, type: 'dim', line: s.line, off: s.off, color: col, size });
+      } else if (s.type === 'text' && isPt(s) && typeof s.text === 'string' && s.text.trim()) {
+        out.push({ id: s.id, type: 'text', x: s.x, y: s.y, text: s.text.slice(0, 200), color: col, size });
+      } else continue;
+      maxId = Math.max(maxId, s.id);
+    }
+    return { shapes: out, nextId: Math.max(maxId + 1, num(d.nextId) ? d.nextId : 1) };
+  }
+
+  function examplePlan() {
+    let id = 1;
+    const ink = COLORS[0].v, red = COLORS[1].v, brown = COLORS[6].v;
+    const L = (ax, ay, bx, by, c, w) => ({ id: id++, type: 'line', a: { x: ax, y: ay }, b: { x: bx, y: by }, color: c, width: WIDTHS[w] });
+    const T = (x, y, text, c, size) => ({ id: id++, type: 'text', x, y, text, color: c, size: SIZES[size] });
+    const lotTop = L(196, 164, 460, 164, ink, 'bold');
+    const lotRight = L(460, 164, 460, 329, ink, 'bold');
+    const out = [
+      lotTop, lotRight, L(460, 329, 196, 329, ink, 'bold'), L(196, 329, 196, 164, ink, 'bold'),
+      L(300, 196, 350, 196, ink, 'med'), L(350, 196, 350, 232, ink, 'med'),
+      L(350, 232, 300, 232, ink, 'med'), L(300, 232, 300, 196, ink, 'med'),
+      L(0, 352, 656, 352, brown, 'thin')
+    ];
+    const f1 = L(256, 232, 256, 300, red, 'bold'), f2 = L(256, 300, 404, 300, red, 'bold'), f3 = L(404, 300, 404, 232, red, 'bold');
+    out.push(f1, f2, f3);
+    out.push(
+      { id: id++, type: 'dim', line: lotTop.id, off: -14, color: ink, size: SIZES.M },
+      { id: id++, type: 'dim', line: lotRight.id, off: -14, color: ink, size: SIZES.M },
+      { id: id++, type: 'dim', line: f2.id, off: 12, color: red, size: SIZES.M },
+      T(309, 214, 'HOUSE', ink, 'M'),
+      T(262, 290, 'fence', red, 'S'),
+      T(250, 368, 'OLD MISSION RD', brown, 'L'),
+      T(196, 146, 'Example plan. Press Clear to start your own.', ink, 'M')
+    );
+    return { shapes: out, nextId: id };
+  }
+
+  function loadInitial() {
+    let d = null;
+    try { d = sanitize(JSON.parse(localStorage.getItem(STORE_KEY) || 'null')); } catch (e) { d = null; }
+    if (!d) d = examplePlan();
+    shapes = d.shapes; nextId = d.nextId;
+    history = [snapshot()]; hIdx = 0;
+  }
+
+  // ---- View ----
+  function fit() {
+    const s = fitScale();
+    view.s = s;
+    view.ox = (cw - SHEET_W * s) / 2;
+    view.oy = (ch - SHEET_H * s) / 2;
+    updateStatus(); requestRender();
+  }
+
+  function zoomAt(sx, sy, f) {
+    const ns = clamp(view.s * f, fitScale() * 0.4, 60);
+    const wx = (sx - view.ox) / view.s, wy = (sy - view.oy) / view.s;
+    view.s = ns; view.ox = sx - wx * ns; view.oy = sy - wy * ns;
+    if (cursor) cursor.w = toWorld(cursor.sx, cursor.sy);
+    updateStatus(); requestRender();
+  }
+
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    const nw = Math.max(1, r.width), nh = Math.max(1, r.height), dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(nw * dpr); canvas.height = Math.round(nh * dpr);
+    if (!fitted) { cw = nw; ch = nh; fit(); fitted = true; }
+    else { view.ox += (nw - cw) / 2; view.oy += (nh - ch) / 2; cw = nw; ch = nh; }
+    render();
+  }
+
+  // ---- Tools ----
+  const HINTS = {
+    pan: 'Drag to move around the sheet. Scroll or pinch to zoom.',
+    line: 'Click to start a line. Each click adds a corner, snapped to 1 ft and kept level or plumb. Hold Shift for any angle.',
+    free: 'Drag to draw freehand.',
+    dim: 'Click a straight line, then click where its dimension should sit.',
+    text: 'Click to place a label, type, then press Enter. Click a label to change it.',
+    erase: 'Click or drag across anything to delete it. Deleting a line also deletes its dimension.'
+  };
+
+  function setTool(t) {
+    if (textEdit) closeTextEdit(true);
+    chain = null; dimPending = null; stroke = null; hover = null;
+    tool = t;
+    canvas.dataset.tool = t;
+    document.querySelectorAll('[data-tool]').forEach(b => {
+      if (b.tagName === 'BUTTON') b.setAttribute('aria-pressed', String(b.dataset.tool === t));
+    });
+    updateStatus(); requestRender();
+  }
+
+  function addSegment(q) {
+    if (q.x === chain.last.x && q.y === chain.last.y) return;
+    shapes.push({ id: nextId++, type: 'line', a: { ...chain.last }, b: q, color, width: WIDTHS[widthKey] });
+    chain.last = q;
+    commit();
+  }
+
+  function lineClick(d, p, w, shift) {
+    if (!chain) {
+      const start = snapPt(d.moved ? d.w : w);
+      chain = { last: start };
+      if (d.moved) addSegment(constrain(start, w, shift));
+      return;
+    }
+    const ls = toS(view, chain.last.x, chain.last.y);
+    if (!d.moved && Math.hypot(p.x - ls.x, p.y - ls.y) < 10) { chain = null; return; }
+    addSegment(constrain(chain.last, w, shift));
+  }
+
+  function dimClick(p, w) {
+    if (!dimPending) {
+      const h = hitTest(p.x, p.y, s => s.type === 'line');
+      if (h) dimPending = { lineId: h.id, off: dimOffset(h.id, w) };
+      return;
+    }
+    if (byId(dimPending.lineId)) {
+      shapes.push({ id: nextId++, type: 'dim', line: dimPending.lineId, off: dimOffset(dimPending.lineId, w), color, size: SIZES[sizeKey] });
+      commit();
+    }
+    dimPending = null;
+  }
+
+  function textClick(p, w) {
+    const h = hitTest(p.x, p.y, s => s.type === 'text');
+    if (h) openTextEdit(h.x, h.y, h);
+    else openTextEdit(r2(clamp(w.x, 0, SHEET_W)), r2(clamp(w.y, 0, SHEET_H)), null);
+  }
+
+  function eraseAt(sx, sy) {
+    const h = hitTest(sx, sy);
+    if (h) { removeShape(h.id); erasing.changed = true; hover = null; requestRender(); }
+  }
+
+  // ---- Text editing ----
+  function openTextEdit(x, y, existing) {
+    textEdit = {
+      x, y, id: existing ? existing.id : null,
+      color: existing ? existing.color : color,
+      size: existing ? existing.size : SIZES[sizeKey]
+    };
+    textInput.value = existing ? existing.text : '';
+    textInput.size = Math.max(10, textInput.value.length + 2);
+    textInput.hidden = false;
+    positionTextInput();
+    requestRender();
+    textInput.focus();
+    textInput.select();
+  }
+
+  function positionTextInput() {
+    if (!textEdit) return;
+    const p = toS(view, textEdit.x, textEdit.y), fs = textPx(textEdit.size, view.s);
+    textInput.style.fontSize = fs + 'px';
+    textInput.style.color = textEdit.color;
+    textInput.style.left = (p.x - 5) + 'px';
+    textInput.style.top = (p.y - fs * 0.75 - 1) + 'px';
+  }
+
+  function closeTextEdit(keep) {
+    if (!textEdit) return;
+    const te = textEdit, val = textInput.value.trim().slice(0, 200);
+    textEdit = null;
+    textInput.hidden = true;
+    if (keep) {
+      if (te.id != null) {
+        const s = byId(te.id);
+        if (s && !val) { removeShape(s.id); commit(); }
+        else if (s && val !== s.text) { s.text = val; commit(); }
+      } else if (val) {
+        shapes.push({ id: nextId++, type: 'text', x: te.x, y: te.y, text: val, color: te.color, size: te.size });
+        commit();
+      }
+    }
+    requestRender();
+  }
+
+  textInput.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); closeTextEdit(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeTextEdit(false); }
+  });
+  textInput.addEventListener('input', () => { textInput.size = Math.max(10, textInput.value.length + 2); });
+  textInput.addEventListener('blur', () => closeTextEdit(true));
+
+  // ---- Pointer input ----
+  function pt(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function startPinch() {
+    const [a, b] = [...pointers.values()];
+    if (stroke) stroke = null;
+    if (erasing) { if (erasing.changed) commit(); erasing = null; }
+    down = null; pan = null; canvas.classList.remove('panning');
+    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, s: view.s, ox: view.ox, oy: view.oy };
+  }
+
+  function updatePinch() {
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const ns = clamp(pinch.s * d / pinch.d, fitScale() * 0.4, 60);
+    const wx = (pinch.mx - pinch.ox) / pinch.s, wy = (pinch.my - pinch.oy) / pinch.s;
+    view.s = ns; view.ox = mx - wx * ns; view.oy = my - wy * ns;
+    updateStatus(); requestRender();
+  }
+
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+  canvas.addEventListener('pointerdown', e => {
+    const p = pt(e);
+    e.preventDefault();  // also stops touch compat mouse events from stealing focus from the label editor
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    pointers.set(e.pointerId, p);
+    if (pointers.size === 2) { startPinch(); return; }
+    if (pointers.size > 2) return;
+    if (textEdit) { closeTextEdit(true); suppress = true; return; }
+    suppress = false;
+    const w = toWorld(p.x, p.y);
+    if (e.button === 1 || (e.button === 0 && (tool === 'pan' || spaceHeld))) {
+      e.preventDefault();
+      pan = { sx: p.x, sy: p.y, ox: view.ox, oy: view.oy };
+      canvas.classList.add('panning');
+      return;
+    }
+    if (e.button === 2) {
+      chain = null; dimPending = null;
+      requestRender();
+      return;
+    }
+    if (e.button !== 0) return;
+    down = { id: e.pointerId, sx: p.x, sy: p.y, w, moved: false };
+    if (tool === 'free') {
+      stroke = { type: 'free', color, width: WIDTHS[widthKey], pts: [[r2(clamp(w.x, 0, SHEET_W)), r2(clamp(w.y, 0, SHEET_H))]] };
+    } else if (tool === 'erase') {
+      erasing = { changed: false };
+      eraseAt(p.x, p.y);
+    }
+    requestRender();
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    const p = pt(e);
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
+    if (pinch) { if (pointers.size >= 2) updatePinch(); return; }
+    const w = toWorld(p.x, p.y);
+    cursor = { sx: p.x, sy: p.y, w, shift: e.shiftKey };
+    if (down && Math.hypot(p.x - down.sx, p.y - down.sy) > 6) down.moved = true;
+    if (pan) {
+      view.ox = pan.ox + p.x - pan.sx;
+      view.oy = pan.oy + p.y - pan.sy;
+    } else if (stroke && down && e.pointerId === down.id) {
+      const last = stroke.pts[stroke.pts.length - 1], ls = toS(view, last[0], last[1]);
+      if (Math.hypot(p.x - ls.x, p.y - ls.y) >= 1.5) stroke.pts.push([r2(clamp(w.x, 0, SHEET_W)), r2(clamp(w.y, 0, SHEET_H))]);
+    } else if (erasing) {
+      eraseAt(p.x, p.y);
+    }
+    if (dimPending) dimPending.off = dimOffset(dimPending.lineId, w);
+    if (pan || suppress) hover = null;
+    else if (tool === 'erase') hover = hitTest(p.x, p.y)?.id ?? null;
+    else if (tool === 'dim' && !dimPending) hover = hitTest(p.x, p.y, s => s.type === 'line')?.id ?? null;
+    else if (tool === 'text') hover = hitTest(p.x, p.y, s => s.type === 'text')?.id ?? null;
+    else hover = null;
+    updateStatus(); requestRender();
+  });
+
+  function onUp(e) {
+    if (!pointers.has(e.pointerId)) return;
+    const p = pt(e);
+    pointers.delete(e.pointerId);
+    if (pinch) { if (pointers.size < 2) { pinch = null; suppress = pointers.size > 0; } return; }
+    if (suppress) { if (pointers.size === 0) suppress = false; return; }
+    if (pan) { pan = null; canvas.classList.remove('panning'); return; }
+    if (!down || e.pointerId !== down.id) return;
+    const d = down;
+    down = null;
+    if (e.type === 'pointercancel') {
+      stroke = null;
+      if (erasing && erasing.changed) commit();
+      erasing = null;
+      requestRender();
+      return;
+    }
+    const w = toWorld(p.x, p.y);
+    if (tool === 'free') {
+      if (stroke && stroke.pts.length > 1) { stroke.id = nextId++; shapes.push(stroke); stroke = null; commit(); }
+      stroke = null;
+    } else if (tool === 'erase') {
+      if (erasing && erasing.changed) commit();
+      erasing = null;
+    } else if (tool === 'line') lineClick(d, p, w, e.shiftKey);
+    else if (tool === 'dim') dimClick(p, w);
+    else if (tool === 'text') textClick(p, w);
+    updateStatus(); requestRender();
+  }
+  canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onUp);
+  canvas.addEventListener('pointerleave', e => {
+    if (e.pointerType === 'mouse' && !pointers.size) { cursor = null; hover = null; updateStatus(); requestRender(); }
+  });
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const p = pt(e);
+    let dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 16; else if (e.deltaMode === 2) dy *= 400;
+    zoomAt(p.x, p.y, Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015)));
+  }, { passive: false });
+
+  // ---- Keyboard ----
+  const KEYS = { v: 'pan', l: 'line', f: 'free', d: 'dim', t: 'text', e: 'erase' };
+  window.addEventListener('keydown', e => {
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    if (!filePanel.hidden) { if (e.key === 'Escape') closeFile(); return; }
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+    if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+    if (mod && k === 'y') { e.preventDefault(); redo(); return; }
+    if (mod || e.altKey) return;
+    if (e.key === 'Shift') { if (cursor) { cursor.shift = true; requestRender(); } return; }
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (!spaceHeld) { spaceHeld = true; canvas.classList.add('space'); }
+      return;
+    }
+    if (e.key === 'Escape') {
+      if (chain || dimPending || stroke) { chain = null; dimPending = null; stroke = null; requestRender(); }
+      else setTool('pan');
+      updateStatus();
+      return;
+    }
+    if (e.key === 'Enter') { if (chain) { chain = null; updateStatus(); requestRender(); } return; }
+    if (e.key === '0' || e.key === 'Home') { fit(); return; }
+    if (KEYS[k]) setTool(KEYS[k]);
+  });
+  window.addEventListener('keyup', e => {
+    if (e.key === ' ') { spaceHeld = false; canvas.classList.remove('space'); }
+    if (e.key === 'Shift' && cursor) { cursor.shift = false; requestRender(); }
+  });
+
+  // ---- Toolbar ----
+  const colorsEl = $('#colors');
+  COLORS.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.className = 'swatch'; b.id = 'color-' + i; b.dataset.color = c.v;
+    b.style.setProperty('--c', c.v);
+    b.title = c.name; b.setAttribute('aria-label', c.name + ' color');
+    colorsEl.appendChild(b);
+  });
+
+  function updateButtons() {
+    document.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.color === color)));
+    document.querySelectorAll('[data-w]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.w === widthKey)));
+    document.querySelectorAll('[data-size]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.size === sizeKey)));
+    $('#undo').disabled = hIdx <= 0;
+    $('#redo').disabled = hIdx >= history.length - 1;
+  }
+
+  document.querySelector('.bar').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.tool) setTool(b.dataset.tool === tool && tool !== 'pan' ? 'pan' : b.dataset.tool);
+    else if (b.dataset.color) { color = b.dataset.color; if (textEdit) { textEdit.color = color; positionTextInput(); } }
+    else if (b.dataset.w) widthKey = b.dataset.w;
+    else if (b.dataset.size) { sizeKey = b.dataset.size; if (textEdit) { textEdit.size = SIZES[sizeKey]; positionTextInput(); } }
+    else if (b.id === 'undo') undo();
+    else if (b.id === 'redo') redo();
+    else if (b.id === 'fit') fit();
+    else if (b.id === 'file') openFile();
+    else if (b.id === 'clear') clearClick(b);
+    updateButtons(); requestRender();
+  });
+  // Keep the label editor open when picking a color or size for it
+  document.querySelector('.bar').addEventListener('pointerdown', e => {
+    if (textEdit && e.target.closest('.swatch, [data-size]')) e.preventDefault();
+  });
+
+  function clearClick(b) {
+    if (Date.now() - clearArmed < 3000) {
+      clearArmed = 0;
+      cancelOps();
+      shapes = [];
+      commit();
+      b.textContent = 'Clear'; b.classList.remove('danger');
+      return;
+    }
+    clearArmed = Date.now();
+    b.textContent = 'Clear everything?'; b.classList.add('danger');
+    setTimeout(() => {
+      if (Date.now() - clearArmed >= 2900) { b.textContent = 'Clear'; b.classList.remove('danger'); }
+    }, 3000);
+  }
+
+  // ---- Save / open panel ----
+  function openFile() {
+    cancelOps();
+    const k = 3, pad = 48;
+    const oc = document.createElement('canvas');
+    oc.width = Math.ceil(SHEET_W * k + pad * 2);
+    oc.height = Math.ceil(SHEET_H * k + pad * 2);
+    drawScene(oc.getContext('2d'), { s: k, ox: pad, oy: pad }, oc.width, oc.height, false);
+    $('#snap').src = oc.toDataURL('image/png');
+    $('#plan-json').value = snapshot();
+    $('#file-msg').textContent = '';
+    filePanel.hidden = false;
+    $('#file-close').focus();
+  }
+  function closeFile() { filePanel.hidden = true; $('#file').focus(); }
+
+  function loadPlanText(text) {
+    let d = null;
+    try { d = sanitize(JSON.parse(text)); } catch (e) { d = null; }
+    if (!d) { $('#file-msg').textContent = 'That text is not a Lot Planner plan. Paste the full text you copied earlier.'; return; }
+    shapes = d.shapes; nextId = d.nextId;
+    commit();
+    $('#file-msg').textContent = `Loaded ${shapes.length} items.`;
+    $('#plan-json').value = snapshot();
+  }
+
+  $('#file-close').addEventListener('click', closeFile);
+  filePanel.addEventListener('click', e => { if (e.target === filePanel) closeFile(); });
+  $('#copy-json').addEventListener('click', () => {
+    const ta = $('#plan-json');
+    const fallback = () => { ta.focus(); ta.select(); $('#file-msg').textContent = 'Text selected. Press Ctrl+C (or Cmd+C) to copy it.'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(() => { $('#file-msg').textContent = 'Copied.'; }, fallback);
+    } else fallback();
+  });
+  $('#load-json').addEventListener('click', () => loadPlanText($('#plan-json').value));
+  $('#open-file').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => loadPlanText(String(r.result));
+    r.readAsText(f);
+    e.target.value = '';
+  });
+
+  // ---- Status bar ----
+  function updateStatus() {
+    let pos = '–';
+    if (cursor) {
+      const w = tool === 'line' ? (chain ? constrain(chain.last, cursor.w, cursor.shift) : snapPt(cursor.w)) : cursor.w;
+      if (w.x >= 0 && w.y >= 0 && w.x <= SHEET_W && w.y <= SHEET_H) {
+        const f = v => tool === 'line' ? String(v) : v.toFixed(1);
+        pos = `X ${f(w.x)}'  Y ${f(w.y)}'`;
+      }
+    }
+    $('#st-pos').textContent = pos;
+    $('#st-zoom').textContent = Math.round(view.s / fitScale() * 100) + '%';
+    let hint = HINTS[tool];
+    if (chain) hint = 'Click to add the next corner. To finish, click the last point again, press Enter or Esc, or right-click. Shift frees the angle.';
+    else if (dimPending) hint = 'Move to set how far the dimension sits from the line, then click to place it. Esc cancels.';
+    $('#st-hint').textContent = hint;
+  }
+
+  // ---- Theme changes and fonts ----
+  try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', requestRender); } catch (e) { /* old browser */ }
+  new MutationObserver(requestRender).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  if (document.fonts) {
+    document.fonts.load(`16px ${PLAN_FONT}`).then(requestRender, () => {});
+    document.fonts.load(`500 11px ${DATA_FONT}`).then(requestRender, () => {});
+  }
+
+  // ---- Start ----
+  loadInitial();
+  setTool('pan');
+  updateButtons();
+  new ResizeObserver(resize).observe(stage);
+})();
+</script>
+</body>
+</html>
