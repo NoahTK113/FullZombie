@@ -263,6 +263,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   let chain = null;        // line in progress: { last }
   let rectStart = null;    // rectangle corner from a first click
   let dimStart = null;     // dimension start from a first click
+  let dimPick = null;      // segment picked for a parallel dimension: { a, b }
   let stroke = null;       // freehand in progress
   let cursor = null;       // { sx, sy, w, shift }
   let hover = null, selected = null, panelFor = null;
@@ -369,7 +370,13 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     mctx.font = `${fs}px ${PLAN_FONT}`;
     const tw = s.label ? mctx.measureText(s.label).width : 0;
     const lift = fs * 0.62 + 2;
-    return { A, B, a, fs, tw, cx: (A.x + B.x) / 2 + Math.sin(a) * lift, cy: (A.y + B.y) / 2 - Math.cos(a) * lift };
+    let ux = Math.sin(a), uy = -Math.cos(a);
+    // A dimension that measures a line keeps its label on the side away from that line
+    if (s.from) {
+      const F = toS(v, s.from.a.x, s.from.a.y);
+      if ((A.x - F.x) * ux + (A.y - F.y) * uy < 0) { ux = -ux; uy = -uy; }
+    }
+    return { A, B, a, fs, tw, cx: (A.x + B.x) / 2 + ux * lift, cy: (A.y + B.y) / 2 + uy * lift };
   }
 
   function drawDim(c, v, s) {
@@ -392,6 +399,20 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     c.beginPath();
     for (const P of [A, B]) { c.moveTo(P.x - uy * 5, P.y + ux * 5); c.lineTo(P.x + uy * 5, P.y - ux * 5); }
     c.stroke();
+    // Dashed projection lines from the measured segment's ends out to the dimension line
+    if (s.from) {
+      c.save();
+      c.setLineDash([4, 3]); c.lineWidth = 1;
+      c.beginPath();
+      for (const [F, P] of [[toS(v, s.from.a.x, s.from.a.y), A], [toS(v, s.from.b.x, s.from.b.y), B]]) {
+        const dx = P.x - F.x, dy = P.y - F.y, dl = Math.hypot(dx, dy);
+        if (dl < 4) continue;
+        c.moveTo(F.x + dx / dl * 3, F.y + dy / dl * 3);
+        c.lineTo(P.x + dx / dl * 6, P.y + dy / dl * 6);
+      }
+      c.stroke();
+      c.restore();
+    }
     if (s.label && !(textEdit && textEdit.id === s.id)) {
       c.save();
       c.translate(g.cx, g.cy); c.rotate(g.a);
@@ -608,6 +629,16 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
         const b = toS(view, P.x, P.y);
         ctx.globalAlpha = 1;
         if (r.w || r.h) pill(ctx, `${num2(r.w)}' × ${num2(r.h)}'`, b.x + 12, b.y - 14, pal);
+      } else if (tool === 'dim' && dimPick) {
+        P = null;
+        strokePts(ctx, [toS(view, dimPick.a.x, dimPick.a.y), toS(view, dimPick.b.x, dimPick.b.y)], 9, 'rgba(31,95,191,0.25)');
+        const pd = parallelDim(dimPick, cursor.w);
+        drawDim(ctx, view, { ...pd, label: fmtFt(pd.len), color, size: SIZES[sizeKey] });
+        ctx.globalAlpha = 1;
+        pill(ctx, `offset ${Math.abs(pd.off)}'`, cursor.sx + 14, cursor.sy + 18, pal);
+      } else if (tool === 'dim' && !start && !down) {
+        const seg = segmentAt(cursor.sx, cursor.sy);
+        if (seg && !hover) strokePts(ctx, [toS(view, seg.a.x, seg.a.y), toS(view, seg.b.x, seg.b.y)], 9, 'rgba(31,95,191,0.18)');
       } else if (tool === 'dim' && start) {
         P = constrain(start, cursor.w, cursor.shift || anyAngle);
         const len = Math.hypot(P.x - start.x, P.y - start.y);
@@ -624,7 +655,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
         }
       }
       ctx.restore();
-      snapMarker(ctx, P, pal);
+      if (P) snapMarker(ctx, P, pal);
     }
 
     drawScaleBar(ctx, pal);
@@ -687,8 +718,8 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   }
 
   function moveText(m) {
-    const x = m.dx ? `${m.dx < 0 ? '←' : '→'} ${Math.abs(m.dx)}'` : '';
-    const y = m.dy ? `${m.dy < 0 ? '↑' : '↓'} ${Math.abs(m.dy)}'` : '';
+    const x = m.dx ? `${m.dx < 0 ? '←' : '→'} ${num2(Math.abs(m.dx))}'` : '';
+    const y = m.dy ? `${m.dy < 0 ? '↑' : '↓'} ${num2(Math.abs(m.dy))}'` : '';
     return (x + '  ' + y).trim() || "0'";
   }
 
@@ -721,16 +752,45 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   // Point snap: near a straight line or rectangle side, snap to whole feet measured along it
   // from its start (so diagonal lines get true 1 ft spacing); elsewhere snap to the grid.
   const r4 = v => Math.round(v * 1e4) / 1e4;
+  function segmentsOf(s) {
+    if (s.type === 'line') return [[s.a, s.b]];
+    if (s.type !== 'rect') return [];
+    const c = [{ x: s.x, y: s.y }, { x: s.x + s.w, y: s.y }, { x: s.x + s.w, y: s.y + s.h }, { x: s.x, y: s.y + s.h }];
+    return [[c[0], c[1]], [c[1], c[2]], [c[2], c[3]], [c[3], c[0]]];
+  }
+
+  // Nearest straight line or rectangle side under the cursor
+  function segmentAt(sx, sy) {
+    let best = null;
+    for (const s of shapes) {
+      for (const [a, b] of segmentsOf(s)) {
+        const A = toS(view, a.x, a.y), B = toS(view, b.x, b.y);
+        const d = distSeg(sx, sy, A.x, A.y, B.x, B.y);
+        if (d <= HIT_PX + (s.width || 0) / 2 && (!best || d < best.d) && Math.hypot(b.x - a.x, b.y - a.y) > 1e-6) {
+          best = { d, a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } };
+        }
+      }
+    }
+    return best;
+  }
+
+  // A dimension parallel to the picked segment, offset (in whole feet) toward the cursor
+  function parallelDim(seg, w) {
+    const len = Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y);
+    const nx = -(seg.b.y - seg.a.y) / len, ny = (seg.b.x - seg.a.x) / len;
+    const off = Math.round((w.x - seg.a.x) * nx + (w.y - seg.a.y) * ny);
+    return {
+      type: 'dim', off, len,
+      a: { x: r4(seg.a.x + nx * off), y: r4(seg.a.y + ny * off) },
+      b: { x: r4(seg.b.x + nx * off), y: r4(seg.b.y + ny * off) },
+      from: { a: { ...seg.a }, b: { ...seg.b } }
+    };
+  }
+
   function pointSnap(w, sx, sy) {
     let best = null;
     for (const s of shapes) {
-      let segs;
-      if (s.type === 'line') segs = [[s.a, s.b]];
-      else if (s.type === 'rect') {
-        const c = [{ x: s.x, y: s.y }, { x: s.x + s.w, y: s.y }, { x: s.x + s.w, y: s.y + s.h }, { x: s.x, y: s.y + s.h }];
-        segs = [[c[0], c[1]], [c[1], c[2]], [c[2], c[3]], [c[3], c[0]]];
-      } else continue;
-      for (const [a, b] of segs) {
+      for (const [a, b] of segmentsOf(s)) {
         const A = toS(view, a.x, a.y), B = toS(view, b.x, b.y);
         const d = distSeg(sx, sy, A.x, A.y, B.x, B.y);
         if (d > GRAB_PX || (best && d >= best.d)) continue;
@@ -760,6 +820,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       const q = constrain(other, w, shift || anyAngle);
       if (q.x === other.x && q.y === other.y) return;
       t[g.end] = q;
+      delete t.from;
     } else {
       const q = snapPt(w);
       let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
@@ -775,7 +836,15 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   }
 
   function updateMove(w) {
-    const dx = Math.round(w.x - move.start.x), dy = Math.round(w.y - move.start.y);
+    const o = move.orig;
+    let dx = Math.round(w.x - move.start.x), dy = Math.round(w.y - move.start.y);
+    if (o.type === 'dim' && o.from) {
+      // A dimension that measures a line slides only in and out, so its projection lines stay square
+      const len = Math.hypot(o.b.x - o.a.x, o.b.y - o.a.y);
+      const nx = -(o.b.y - o.a.y) / len, ny = (o.b.x - o.a.x) / len;
+      const k = Math.round((w.x - move.start.x) * nx + (w.y - move.start.y) * ny);
+      dx = r4(nx * k); dy = r4(ny * k);
+    }
     if (dx === move.dx && dy === move.dy) return;
     move.dx = dx; move.dy = dy;
     replaceShape(translated(move.orig, dx, dy));
@@ -814,7 +883,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   }
 
   function cancelOps() {
-    chain = null; rectStart = null; dimStart = null; stroke = null; erasing = null;
+    chain = null; rectStart = null; dimStart = null; dimPick = null; stroke = null; erasing = null;
     abortEdits();
     if (textEdit) closeTextEdit(false);
   }
@@ -847,7 +916,9 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
                  s.pts.every(p => Array.isArray(p) && num(p[0]) && num(p[1]))) {
         out.push({ ...base, pts: s.pts.map(p => [p[0], p[1]]), width });
       } else if (s.type === 'dim' && isPt(s.a) && isPt(s.b)) {
-        out.push({ ...base, a: { x: s.a.x, y: s.a.y }, b: { x: s.b.x, y: s.b.y }, label: typeof s.label === 'string' ? s.label.slice(0, 200) : '', size });
+        const dim = { ...base, a: { x: s.a.x, y: s.a.y }, b: { x: s.b.x, y: s.b.y }, label: typeof s.label === 'string' ? s.label.slice(0, 200) : '', size };
+        if (s.from && isPt(s.from.a) && isPt(s.from.b)) dim.from = { a: { x: s.from.a.x, y: s.from.a.y }, b: { x: s.from.b.x, y: s.from.b.y } };
+        out.push(dim);
       } else if (s.type === 'dim' && num(s.off) && lines.has(s.line)) {
         // Older plans tied dimensions to a line; turn them into freestanding dimension lines
         const L = lines.get(s.line), len = Math.hypot(L.b.x - L.a.x, L.b.y - L.a.y);
@@ -1037,14 +1108,14 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     rect: 'Drag, or click two corners, to draw a rectangle snapped to 1 ft. Hold Shift for a square.',
     dot: 'Click to place a point. Near a line it snaps every 1 ft along the line, measured from where the line starts; elsewhere it snaps to the 1 ft grid.',
     free: 'Drag to draw freehand.',
-    dim: 'Drag, or click two points, to draw a dimension line, then type its label. Click a dimension label to change it.',
+    dim: 'Click a line or rectangle side, move out to set the offset, and click to place a parallel dimension. Or drag or click two points on open space. Then type the label.',
     text: 'Click to place a label, type, then press Enter. Click a label to change it.',
     erase: 'Click or drag across anything to delete it.'
   };
 
   function setTool(t) {
     if (textEdit) closeTextEdit(true);
-    chain = null; rectStart = null; dimStart = null; stroke = null; hover = null;
+    chain = null; rectStart = null; dimStart = null; dimPick = null; stroke = null; hover = null;
     abortEdits();
     if (t !== 'select') selected = null;
     tool = t;
@@ -1091,20 +1162,29 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     else rectStart = snapPt(w);
   }
 
-  function addDim(a, b) {
+  function addDim(a, b, from, measured) {
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     if (!len) return;
-    const s = { id: nextId++, type: 'dim', a: { ...a }, b: { ...b }, label: fmtFt(len), color, size: SIZES[sizeKey] };
+    const s = { id: nextId++, type: 'dim', a: { ...a }, b: { ...b }, label: fmtFt(measured ?? len), color, size: SIZES[sizeKey] };
+    if (from) s.from = from;
     shapes.push(s);
     commit();
     openTextEdit(s);
   }
 
   function dimClick(d, p, w, shift) {
+    if (dimPick) {
+      const pd = parallelDim(dimPick, w);
+      dimPick = null;
+      addDim(pd.a, pd.b, pd.off ? pd.from : null, pd.len);
+      return;
+    }
     if (dimStart) { addDim(dimStart, constrain(dimStart, w, shift)); dimStart = null; return; }
     if (d.moved) { const a = snapPt(d.w); addDim(a, constrain(a, w, shift)); return; }
     const h = hitTest(p.x, p.y, s => s.type === 'dim');
     if (h) { openTextEdit(h); return; }
+    const seg = segmentAt(p.x, p.y);
+    if (seg) { dimPick = seg; return; }
     dimStart = snapPt(w);
   }
 
@@ -1231,7 +1311,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       return;
     }
     if (e.button === 2) {
-      chain = null; rectStart = null; dimStart = null;
+      chain = null; rectStart = null; dimStart = null; dimPick = null;
       updateStatus(); requestRender();
       return;
     }
@@ -1300,7 +1380,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     if (pan || move || resize || suppress) hover = null;
     else if (tool === 'erase' || tool === 'select' || tool === 'move') hover = hitTest(p.x, p.y)?.id ?? null;
     else if (tool === 'text') hover = hitTest(p.x, p.y, s => s.type === 'text')?.id ?? null;
-    else if (tool === 'dim' && !dimStart && !down) hover = hitTest(p.x, p.y, s => s.type === 'dim')?.id ?? null;
+    else if (tool === 'dim' && !dimStart && !dimPick && !down) hover = hitTest(p.x, p.y, s => s.type === 'dim')?.id ?? null;
     else hover = null;
     canvas.classList.toggle('over', (tool === 'select' || tool === 'move') && (hover != null || !!move));
     if (tool === 'select' && !pan) {
@@ -1393,7 +1473,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     }
     if (e.key === 'Escape') {
       if (move || resize) { abortEdits(); if (tool === 'move') selected = null; }
-      else if (chain || rectStart || dimStart || stroke) { chain = null; rectStart = null; dimStart = null; stroke = null; }
+      else if (chain || rectStart || dimStart || dimPick || stroke) { chain = null; rectStart = null; dimStart = null; dimPick = null; stroke = null; }
       else if (tool === 'select') select(null);
       else setTool('select');
       updateStatus(); requestRender();
@@ -1556,6 +1636,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     else if (move && move.mode === 'carry') hint = 'Move to the new spot and click to place it. Esc puts it back.';
     else if (rectStart) hint = 'Click the opposite corner. Hold Shift for a square. Esc cancels.';
     else if (dimStart) hint = 'Click where the dimension line ends. Shift frees the angle. Esc cancels.';
+    else if (dimPick) hint = 'Move in or out to set how far the dimension sits from the line, then click to place it. Esc cancels.';
     $('#st-hint').textContent = hint;
   }
 
