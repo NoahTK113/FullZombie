@@ -156,6 +156,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     </div>
     <div class="group">
       <button class="btn" id="any-angle" title="Let lines and dimensions take any angle instead of level or plumb. Holding Shift does the same. (A)">Any angle <kbd>A</kbd></button>
+      <button class="btn" id="grid-toggle" title="Show or hide the background grid (G)">Grid <kbd>G</kbd></button>
     </div>
     <div class="group" id="colors" role="group" aria-label="Color"></div>
     <div class="group" role="group" aria-label="Line weight">
@@ -269,6 +270,12 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
   let move = null;         // Move tool: { id, start, orig, dx, dy, mode: 'press' | 'drag' | 'carry', sx, sy }
   let resize = null;       // Select tool handle drag: { id, orig, grab, moved }
   let spaceHeld = false, textEdit = null, clearArmed = 0, anyAngle = false;
+  let showGrid = true;
+  try { showGrid = localStorage.getItem('lot-planner.grid') !== 'off'; } catch (e) { /* storage unavailable */ }
+  function toggleGrid() {
+    showGrid = !showGrid;
+    try { localStorage.setItem('lot-planner.grid', showGrid ? 'on' : 'off'); } catch (e) { /* storage unavailable */ }
+  }
   const GRAB_PX = 10;
   const pointers = new Map();
 
@@ -473,7 +480,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     const capY = v.oy + SHEET_H * v.s + 9;
     if (capY < H - 6) {
       c.textAlign = 'left'; c.textBaseline = 'top';
-      c.fillText(`Sheet 656' × 492' (200 m × 150 m)   Grid 10' and 100'   Snap 1'`, Math.max(v.ox, 8), capY);
+      c.fillText(`Sheet 656' × 492' (200 m × 150 m)   ${showGrid ? "Grid 10' and 100'   " : ''}Snap 1'`, Math.max(v.ox, 8), capY);
     }
   }
 
@@ -484,7 +491,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     if (live) { c.shadowColor = 'rgba(10,20,28,0.25)'; c.shadowBlur = 18; c.shadowOffsetY = 4; }
     c.fillStyle = SHEET; c.fillRect(v.ox, v.oy, SHEET_W * v.s, SHEET_H * v.s);
     c.restore();
-    drawGrid(c, v, W, H);
+    if (showGrid) drawGrid(c, v, W, H);
     c.strokeStyle = 'rgba(29,42,51,0.75)'; c.lineWidth = 1.5;
     c.strokeRect(v.ox, v.oy, SHEET_W * v.s, SHEET_H * v.s);
     drawRulers(c, v, W, H, pal);
@@ -606,7 +613,15 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
         const len = Math.hypot(P.x - start.x, P.y - start.y);
         if (len > 0) drawDim(ctx, view, { type: 'dim', a: start, b: P, label: fmtFt(len), color, size: SIZES[sizeKey] });
       } else if (tool === 'dot') {
+        const ps = pointSnap(cursor.w, cursor.sx, cursor.sy);
+        P = ps;
+        if (!ps.grid) strokePts(ctx, ps.seg.map(q => toS(view, q.x, q.y)), 9, 'rgba(31,95,191,0.25)');
         drawDot(ctx, view, { x: P.x, y: P.y, color, width: WIDTHS[widthKey] });
+        if (!ps.grid) {
+          const b = toS(view, P.x, P.y);
+          ctx.globalAlpha = 1;
+          pill(ctx, `${num2(ps.t)}' · ${num2(ps.len - ps.t)}'`, b.x + 12, b.y - 14, pal);
+        }
       }
       ctx.restore();
       snapMarker(ctx, P, pal);
@@ -701,6 +716,34 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       }
     }
     return null;
+  }
+
+  // Point snap: near a straight line or rectangle side, snap to whole feet measured along it
+  // from its start (so diagonal lines get true 1 ft spacing); elsewhere snap to the grid.
+  const r4 = v => Math.round(v * 1e4) / 1e4;
+  function pointSnap(w, sx, sy) {
+    let best = null;
+    for (const s of shapes) {
+      let segs;
+      if (s.type === 'line') segs = [[s.a, s.b]];
+      else if (s.type === 'rect') {
+        const c = [{ x: s.x, y: s.y }, { x: s.x + s.w, y: s.y }, { x: s.x + s.w, y: s.y + s.h }, { x: s.x, y: s.y + s.h }];
+        segs = [[c[0], c[1]], [c[1], c[2]], [c[2], c[3]], [c[3], c[0]]];
+      } else continue;
+      for (const [a, b] of segs) {
+        const A = toS(view, a.x, a.y), B = toS(view, b.x, b.y);
+        const d = distSeg(sx, sy, A.x, A.y, B.x, B.y);
+        if (d > GRAB_PX || (best && d >= best.d)) continue;
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 1e-6) continue;
+        const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+        const proj = (w.x - a.x) * ux + (w.y - a.y) * uy;
+        let t = clamp(Math.round(proj), 0, Math.floor(len + 1e-9));
+        if (Math.abs(proj - len) < Math.abs(proj - t)) t = len;   // allow the far end itself
+        best = { d, x: r4(a.x + ux * t), y: r4(a.y + uy * t), t, len, seg: [a, b] };
+      }
+    }
+    return best || { ...snapPt(w), grid: true };
   }
 
   function grabCursor(g) {
@@ -992,7 +1035,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     move: 'Drag an item to move it in 1 ft steps, or click it, move, and click again to place it. Drag empty space to pan.',
     line: 'Drag, or click corner to corner, to draw straight lines snapped to 1 ft and kept level or plumb. Hold Shift for any angle.',
     rect: 'Drag, or click two corners, to draw a rectangle snapped to 1 ft. Hold Shift for a square.',
-    dot: 'Click to place a point, snapped to 1 ft.',
+    dot: 'Click to place a point. Near a line it snaps every 1 ft along the line, measured from where the line starts; elsewhere it snaps to the 1 ft grid.',
     free: 'Drag to draw freehand.',
     dim: 'Drag, or click two points, to draw a dimension line, then type its label. Click a dimension label to change it.',
     text: 'Click to place a label, type, then press Enter. Click a label to change it.',
@@ -1313,7 +1356,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       erasing = null;
     } else if (tool === 'line') lineClick(d, p, w, e.shiftKey || anyAngle);
     else if (tool === 'rect') rectClick(d, w, e.shiftKey);
-    else if (tool === 'dot') { const q = snapPt(w); shapes.push({ id: nextId++, type: 'dot', x: q.x, y: q.y, color, width: WIDTHS[widthKey] }); commit(); }
+    else if (tool === 'dot') { const q = pointSnap(w, p.x, p.y); shapes.push({ id: nextId++, type: 'dot', x: q.x, y: q.y, color, width: WIDTHS[widthKey] }); commit(); }
     else if (tool === 'dim') dimClick(d, p, w, e.shiftKey || anyAngle);
     else if (tool === 'text') textClick(p, w);
     updateStatus(); requestRender();
@@ -1368,6 +1411,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     }
     if (e.key === '0' || e.key === 'Home') { fit(); return; }
     if (k === 'a') { anyAngle = !anyAngle; updateButtons(); requestRender(); return; }
+    if (k === 'g') { toggleGrid(); updateButtons(); requestRender(); return; }
     if (KEYS[k]) setTool(KEYS[k]);
   });
   window.addEventListener('keyup', e => {
@@ -1390,6 +1434,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     document.querySelectorAll('[data-w]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.w === widthKey)));
     document.querySelectorAll('[data-size]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.size === sizeKey)));
     $('#any-angle').setAttribute('aria-pressed', String(anyAngle));
+    $('#grid-toggle').setAttribute('aria-pressed', String(showGrid));
     $('#undo').disabled = hIdx <= 0;
     $('#redo').disabled = hIdx >= history.length - 1;
   }
@@ -1417,6 +1462,7 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
       restyleSelected(s => { if (!('size' in s) || s.size === SIZES[sizeKey]) return false; s.size = SIZES[sizeKey]; return true; });
     }
     else if (b.id === 'any-angle') anyAngle = !anyAngle;
+    else if (b.id === 'grid-toggle') toggleGrid();
     else if (b.id === 'undo') undo();
     else if (b.id === 'redo') redo();
     else if (b.id === 'fit') fit();
@@ -1497,9 +1543,9 @@ kbd { font: 500 10px var(--font-data); opacity: 0.6; }
     let pos = '–';
     const snapping = { line: 1, rect: 1, dot: 1, dim: 1 }[tool];
     if (cursor) {
-      const w = snapping ? snapPt(cursor.w) : cursor.w;
+      const w = tool === 'dot' ? pointSnap(cursor.w, cursor.sx, cursor.sy) : snapping ? snapPt(cursor.w) : cursor.w;
       if (w.x >= 0 && w.y >= 0 && w.x <= SHEET_W && w.y <= SHEET_H) {
-        const f = v => snapping ? String(v) : v.toFixed(1);
+        const f = v => snapping ? num2(v) : v.toFixed(1);
         pos = `X ${f(w.x)}'  Y ${f(w.y)}'`;
       }
     }
